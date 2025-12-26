@@ -1,8 +1,10 @@
 import pandas as pd
 import os
 
-input_file = 'extracted/rna.csv'
-output_file = 'extracted/rna.fasta'
+base = 'extracted/stage3/'
+
+input_file = base + 'rna_stage3.csv'
+output_file = base + 'rna_stage3.fasta'
 
 print(f"Reading {input_file}...")
 

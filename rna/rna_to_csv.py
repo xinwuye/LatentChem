@@ -2,8 +2,10 @@ import pandas as pd
 import ast
 import os
 
-input_file = 'extracted/rna.csv'
-output_file = 'extracted/rna_flattened.csv'
+base = 'extracted/stage3/'
+
+input_file = base + 'rna.csv'
+output_file = base + 'rna_flattened.csv'
 
 print(f"Loading {input_file}...")
 
