@@ -1,171 +1,142 @@
-# ============================
-# Part 1. Dataset loading & preprocessing
-# ============================
-
 import json
 import re
 import torch
-from datasets import load_dataset
+import pandas as pd
+import glob
+import numpy as np
+import os
+from datasets import Dataset
 from transformers import AutoTokenizer
 
 # --------------------------------
-# Load tokenizer (Qwen decoder-only LM)
+# Load tokenizer
 # --------------------------------
-# 使用 Qwen4B 的 tokenizer
-# 对于 decoder-only 模型，通常将 pad_token 设置为 eos_token
 tokenizer = AutoTokenizer.from_pretrained(
-    "/zengdaojian/zhangjia/BioLatent/Qwen4B"
+    "/home/bingxing2/ailab/fanyutao/biolatentcot/yoyo/BioLatentCOT/rna/code_train_sft/models/Qwen3-8B-Base"
 )
 tokenizer.pad_token = tokenizer.eos_token
-
-# 最大文本长度（prompt + answer）
 MAX_LEN = 128
 
+# --------------------------------
+# 1. Load the RNA Representations
+# --------------------------------
+# We load this globally so the map function can access it
+
+# 1. Initialize an empty master dictionary
+all_rna_representations = {}
+
+# 2. Find all .npy files in all subdirectories (recursive search)
+# The "**" pattern looks through every folder level
+npy_files = glob.glob('/home/bingxing2/ailab/fanyutao/biolatentcot/yoyo/RNA-FM/redevelop/results/biolatentcot_stage3/**/*.npy', recursive=True)
+
+print(f"Found {len(npy_files)} .npy files. Loading...")
+
+for file_path in npy_files:
+    # Skip log files or files that aren't the collections
+    if "representations-collection" in file_path:
+        data = np.load(file_path, allow_pickle=True).item()
+        # Merge this file's dictionary into our master dictionary
+        all_rna_representations.update(data)
+
+print(f"Total unique RNA representations loaded: {len(all_rna_representations)}")
 
 # --------------------------------
-# 1. 从原始数据中抽取关键信息
+# 2. Extract fields from CSV row
 # --------------------------------
-def extract_fields(example):
+def extract_csv_fields(example, idx):
     """
-    从原始 ChemCot 数据中提取：
-    - query: 作为 prompt
-    - input_smiles: 分子 SMILES（用于多模态分子编码器）
-    - label: 作为 LLM 的监督答案
-
-    label 优先级：
-        gt > reference > struct_cot 中解析出的 output
+    example: a row from the CSV
+    idx: the index of the row (to match npy keys)
     """
-    # meta 字段是一个 JSON 字符串，需要先解析
-    meta_dict = json.loads(example["meta"])
+    # 1. The prompt is in the 'input' column
+    query = example.get("input", "")
+    
+    # 2. Get the label (answer) -> this is not super 
+    label_value = str(example.get("label", ""))
 
-    # label 优先级选择
-    if meta_dict.get("gt"):
-        label_value = str(meta_dict["gt"])
-    elif meta_dict.get("reference"):
-        label_value = str(meta_dict["reference"])
-    else:
-        # 从 struct_cot 中用正则提取 "output": "xxx"
-        struct_cot = example.get("struct_cot", "")
-        match = re.search(r'"output"\s*:\s*"(\w+)"', struct_cot)
-        label_value = match.group(1) if match else ""
-
+    # 3. Get RNA representation from the npy dictionary using the index
+    rna_latent = all_rna_representations.get(idx, None)
+    
+    # If the key is a string in the npy, use rna_repr_dict.get(str(idx))
+    
     return {
-        # LLM 输入的文本 prompt
-        "query": example.get("query", ""),
-        # 分子 SMILES，去掉可能存在的 '.'（多片段）
-        "input_smiles": meta_dict.get("molecule", "C").replace(".", ""),
-        # LLM 的监督答案
+        "query": query,
         "label": label_value,
+        "rna_latent": rna_latent, # This is the (96, 640) array
+        "rna_seq": example.get("extracted_sequences", "")
     }
 
-
 # --------------------------------
-# 2. 构造 Causal LM 的训练样本
+# 3. Tokenize and Format for LLM
 # --------------------------------
 def llm_tokenize(example):
-    """
-    构造 Causal Language Model 的训练格式：
-
-        [PROMPT] <eos> [ANSWER]
-
-    训练目标：
-        - 只在 ANSWER 部分计算 loss
-        - PROMPT 部分的 label 设为 -100
-    """
-
     prompt = example["query"]
     answer = example["label"]
 
-    # prompt 与 answer 用 eos_token 分隔
     full_text = prompt + tokenizer.eos_token + answer
 
-    # 对完整文本进行 tokenization
     enc = tokenizer(
         full_text,
-        truncation=True,              # 超长截断
-        padding="max_length",         # padding 到 MAX_LEN
+        truncation=True,
+        padding="max_length",
         max_length=MAX_LEN,
     )
 
     input_ids = enc["input_ids"]
     attention_mask = enc["attention_mask"]
 
-    # -------- 构造 labels --------
-    # 初始 labels 与 input_ids 相同
+    # Labels for Causal LM (-100 for prompt)
     labels = input_ids.copy()
-
-    # 单独对 prompt + eos 进行 tokenize，用来确定 prompt 的 token 长度
     prompt_ids = tokenizer(
         prompt + tokenizer.eos_token,
         truncation=True,
         max_length=MAX_LEN,
     )["input_ids"]
-
     prompt_len = len(prompt_ids)
-
-    # 将 prompt 部分的 label mask 掉（不计算 loss）
     labels[:prompt_len] = [-100] * prompt_len
 
-    # debug：打印当前样本的 SMILES（注意：数据量大时应删除）
-    print(example["input_smiles"])
-
     return {
-        # LLM 的输入 token
         "input_ids": input_ids,
-        # attention mask
         "attention_mask": attention_mask,
-        # Causal LM 的监督信号（prompt 部分为 -100）
         "labels": labels,
-        # 分子 SMILES（供 Qwen3MoleculeLLM 的 forward 使用）
-        "smiles": example["input_smiles"],
+        "rna_latent": example["rna_latent"], # Passed through to trainer
     }
 
-
 # --------------------------------
-# 3. 数据集加载与整体处理流程
+# 4. Modified Data Loading Flow
 # --------------------------------
-def load_data(path):
-    """
-    完整的数据加载流程：
-    1. 加载原始 ChemCot 数据集
-    2. 提取 query / smiles / label
-    3. 将文本转为 LLM 可训练的 token 格式
-    """
+def load_data(csv_path):
+    # 1. Load CSV using pandas
+    df = pd.read_csv(csv_path)
+    
+    # Optional: Fix the "Unnamed" column if it represents the true index
+    # If the npy keys match the 'Unnamed: 0' column specifically:
+    # df = df.set_index('Unnamed: 0') 
 
-    # 加载 HuggingFace datasets 格式的数据
-    ds = load_dataset("/zengdaojian/zhangjia/BioLatent/ChemCotDataset")["train"]
+    # 2. Convert to HuggingFace Dataset
+    raw_ds = Dataset.from_pandas(df)
 
-    print("Raw dataset example:")
-    # print(ds[0])  # 可用于调试原始格式
-
-    # --------------------------------
-    # Step 1: 提取结构化字段
-    # --------------------------------
-    dataset = ds.map(
-        extract_fields,
-        batched=False,
-        remove_columns=ds.column_names  # 移除原始无关字段
+    # 3. Map the extraction (includes npy lookup)
+    # with_indices=True allows us to access the row index to match the npy key
+    dataset = raw_ds.map(
+        extract_csv_fields,
+        with_indices=True,
+        remove_columns=raw_ds.column_names
     )
 
-    # print("After extract_fields:")
-    # print(dataset[0])
-
-    # --------------------------------
-    # Step 2: 构造 LLM 训练样本
-    # --------------------------------
+    # 4. Tokenize
     dataset = dataset.map(
         llm_tokenize,
-        batched=False,
-        remove_columns=["query", "label", "input_smiles"]
+        remove_columns=["query", "label", "rna_seq"]
     )
 
     return dataset
 
-
 # --------------------------------
-# 4. 运行示例
+# 5. Execution
 # --------------------------------
-dataset = load_data("/zengdaojian/zhangjia/BioLatent/ChemCotDataset/chemcotbench-cot")
+dataset = load_data("/home/bingxing2/ailab/fanyutao/biolatentcot/yoyo/BioLatentCOT/rna/extracted/stage3/rna_stage3.csv")
 
-print("Final tokenized dataset example:")
-print(dataset[0])
+print("\nFinal processed sample:")
+print(f"Input IDs Length: {len(dataset[0]['input_ids'])}")
+print(f"RNA Latent Shape: {np.array(dataset[0]['rna_latent']).shape}")

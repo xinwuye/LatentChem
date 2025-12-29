@@ -498,10 +498,10 @@ def test_lora_inference(
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="LoRA微调多模态分子-语言模型")
+    parser = argparse.ArgumentParser(description="LoRA微调多模态RNA-语言模型")
     parser.add_argument("--mode", type=str, choices=["train", "inference"], default="train", help="运行模式")
     parser.add_argument("--model_path", type=str, default="./qwen3_8B_without_rnx_mol_sft_lora_results", help="模型路径")
-    parser.add_argument("--data_path", type=str, default="/zengdaojian/zhangjia/BioLatent/ChemCotDataset/chemcotbench-cot", help="数据路径")
+    parser.add_argument("--data_path", type=str, default="../rna/dataset", help="数据路径")
     parser.add_argument("--batch_size", type=int, default=2, help="批次大小")
     parser.add_argument("--max_seq_length", type=int, default=512, help="最大序列长度")
     parser.add_argument("--epochs", type=int, default=3, help="训练轮数")

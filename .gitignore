@@ -2,3 +2,4 @@ archive/
 *.jsonl
 rna/extracted 
 *.xlsx
+rna/code_train_sft/models
