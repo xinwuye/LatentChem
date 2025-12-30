@@ -51,8 +51,8 @@ def extract_csv_fields(example, idx):
     # 1. The prompt is in the 'input' column
     query = example.get("input", "")
     
-    # 2. Get the label (answer) -> this is not super 
-    label_value = str(example.get("label", ""))
+    # 2. Get the answer (without cot)
+    answer = str(example.get("answer", ""))
 
     # 3. Get RNA representation from the npy dictionary using the index
     rna_latent = all_rna_representations.get(idx, None)
@@ -61,7 +61,7 @@ def extract_csv_fields(example, idx):
     
     return {
         "query": query,
-        "label": label_value,
+        "answer": answer,
         "rna_latent": rna_latent, # This is the (96, 640) array
         "rna_seq": example.get("extracted_sequences", "")
     }
@@ -71,7 +71,7 @@ def extract_csv_fields(example, idx):
 # --------------------------------
 def llm_tokenize(example):
     prompt = example["query"]
-    answer = example["label"]
+    answer = example["answer"]
 
     full_text = prompt + tokenizer.eos_token + answer
 
