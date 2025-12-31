@@ -4,10 +4,12 @@ from dataloader import load_data
 from model_new import Qwen3MoleculeLLM
 import torch
 import os
+from config import ModelConfig
 from typing import Dict, List, Any
 import logging
 from peft import LoraConfig, get_peft_model, TaskType, PeftModel, PeftConfig
 import wandb  # 新增：导入wandb
+
 
 # 设置日志
 logging.basicConfig(level=logging.INFO)
@@ -77,43 +79,51 @@ class LoraTrainingMonitorCallback(TrainerCallback):
         if wandb.run is not None:
             wandb.log({"epoch": state.epoch})
 
-# 内存优化的collate_fn
-def collate_fn(
-    batch,
-    smiles_len=130*5,           # 4 smiles + 2 special tokens
-    pad_token_id=0,
-    label_pad_id=-100,
-):
-    max_len = max(len(x["input_ids"]) for x in batch)
+# 内存优化的collate_fn工厂函数
+def get_collate_fn(num_queries):
+    """
+    根据 num_queries 动态生成对齐的 collate_fn
+    """
+    smiles_len = num_queries + 2 # 自动计算对齐长度 (queries + start + end)
+    
+    def collate_fn(
+        batch,
+        pad_token_id=0,
+        label_pad_id=-100,
+    ):
+        max_len = max(len(x["input_ids"]) for x in batch)
 
-    input_ids = []
-    attention_mask = []
-    labels = []
+        input_ids = []
+        attention_mask = []
+        labels = []
 
-    for x in batch:
-        ids = x["input_ids"]
-        mask = x["attention_mask"]
-        lab = x["labels"]
+        for x in batch:
+            ids = x["input_ids"]
+            mask = x["attention_mask"]
+            lab = x["labels"]
+            
+            pad_len = max_len - len(ids)
 
-        pad_len = max_len - len(ids)
+            # text
+            input_ids.append(ids + [pad_token_id] * pad_len)
+            attention_mask.append(mask + [label_pad_id] * pad_len)
 
-        # text
-        input_ids.append(ids + [pad_token_id] * pad_len)
-        attention_mask.append(mask + [label_pad_id] * pad_len)
-
-        # 🚨 关键：labels 对齐 logits
-        labels.append(
-            [label_pad_id] * smiles_len +   # smiles + special tokens
-            lab  +                         # answer labels
-            [label_pad_id] * pad_len         # padding
-        )
-
-    return {
-        "input_ids": torch.tensor(input_ids, dtype=torch.long),
-        "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
-        "labels": torch.tensor(labels, dtype=torch.long),
-        "smiles": [[x["smiles"].replace(".", "")] for x in batch],
-    }
+            # 🚨 关键：labels 对齐 logits
+            # 这里的 smiles_len 使用的是外部闭包中的变量
+            labels.append(
+                [label_pad_id] * smiles_len +   # smiles + special tokens
+                lab  +                         # answer labels
+                [label_pad_id] * pad_len         # padding
+            )
+        
+        return {
+            "input_ids": torch.tensor(input_ids, dtype=torch.long),
+            "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
+            "labels": torch.tensor(labels, dtype=torch.long),
+            "smiles": [[x["smiles"].replace(".", "")] for x in batch],
+        }
+    
+    return collate_fn
 
 # 加载已训练的模型组件
 def load_trained_components(
@@ -184,11 +194,10 @@ def load_trained_components(
     
     return model
 
-# LoRA SFT训练函数 - 支持继续训练
 def train_sft_lora(
-    model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B",
-    data_path="/zengdaojian/zhangjia/BioLatent/ChemCotDataset/chemcotbench-cot",
-    output_dir="./qwen3_mol_sft_lora_results",
+    model_name=None,
+    data_path=None,
+    output_dir=ModelConfig.DEFAULT_OUTPUT_DIR,
     epochs=3,
     batch_size=32,
     lr=2e-4,
@@ -199,10 +208,26 @@ def train_sft_lora(
     wandb_project="qwen3-molecule-lora-sft",
     wandb_run_name=None,
     wandb_entity=None,
+    mol_config=None,  # 新增：显式传入分子配置
 ):
     """
     使用LoRA进行SFT训练，支持从预训练权重继续训练
     """
+    # 移除 os.environ["WANDB_MODE"] = "disabled"，由 SFTConfig 控制
+    
+    if model_name is None:
+        model_name = ModelConfig.DEFAULT_QWEN_PATH
+    if data_path is None:
+        data_path = ModelConfig.DEFAULT_DATA_PATH
+    
+    # 如果没传 mol_config，则使用默认配置
+    if mol_config is None:
+        mol_config = {
+            'num_queries': ModelConfig.NUM_QUERIES,
+            'input_dim': ModelConfig.INPUT_DIM,
+            'num_heads': ModelConfig.NUM_HEADS
+        }
+    
     logger.info("=" * 60)
     logger.info("LoRA SFT Training for Qwen3MoleculeLLM")
     logger.info(f"Resume from: {resume_from_checkpoint or 'scratch'}")
@@ -241,6 +266,7 @@ def train_sft_lora(
                 "resume_from_checkpoint": resume_from_checkpoint,
                 "lora_weights_path": lora_weights_path,
                 "projector_path": projector_path,
+                "num_queries": mol_config['num_queries'],
                 "training_stage": "second_stage" if (resume_from_checkpoint or lora_weights_path) else "first_stage"
             }
         )
@@ -256,7 +282,8 @@ def train_sft_lora(
     # 1. 初始化基础模型
     # ============================
     logger.info("Initializing base model...")
-    model = Qwen3MoleculeLLM(qwen_model_name=model_name)
+    # 传入 mol_config
+    model = Qwen3MoleculeLLM(qwen_model_name=model_name, mol_config=mol_config, device_map=None)
     tokenizer = model.tokenizer
     
     # 确保pad_token设置
@@ -348,7 +375,7 @@ def train_sft_lora(
         gradient_checkpointing=False,
         max_grad_norm=0.3,
         warmup_ratio=0.1,
-        report_to=["wandb"],
+        report_to="none", # 🚨 默认设为 none，如需开启可在命令行指定或修改此值
         dataloader_pin_memory=False,
         dataloader_num_workers=2,
         optim="adamw_8bit",
@@ -374,12 +401,15 @@ def train_sft_lora(
     # ============================
     logger.info("Initializing SFTTrainer...")
     
+    # 根据配置生成对齐器
+    dynamic_collate_fn = get_collate_fn(num_queries=mol_config['num_queries'])
+    
     trainer = SFTTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        tokenizer=tokenizer,
-        data_collator=collate_fn,
+        tokenizer=tokenizer, # 回退到旧版本的参数名
+        data_collator=dynamic_collate_fn,
         callbacks=[LoraTrainingMonitorCallback()],
     )
     
@@ -390,13 +420,13 @@ def train_sft_lora(
     try:
         if len(train_dataset) > 0:
             test_sample = [train_dataset[0]]
-            test_batch = collate_fn(test_sample)
+            test_batch = dynamic_collate_fn(test_sample)
             
-            if torch.cuda.is_available():
-                device = torch.device("cuda")
-                model = model.to(device)
-                test_batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v 
-                            for k, v in test_batch.items()}
+            # 获取模型主显卡，不再手动对模型调用 .to(device)
+            device = next(model.parameters()).device
+            
+            test_batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v 
+                        for k, v in test_batch.items()}
             
             with torch.no_grad():
                 outputs = model(
@@ -405,7 +435,7 @@ def train_sft_lora(
                     labels=test_batch["labels"],
                     smiles=test_batch["smiles"]
                 )
-            
+
             logger.info(f"Forward test successful!")
             initial_loss = outputs.loss.item() if outputs.loss is not None else float('nan')
             logger.info(f"  Initial Loss: {initial_loss}")
@@ -552,19 +582,30 @@ def train_sft_lora(
 
 # 加载LoRA模型进行推理
 def load_lora_model_for_inference(
-    base_model_path="/zengdaojian/zhangjia/BioLatent/Qwen4B",
+    base_model_path=None,
     lora_weights_path="./qwen3_mol_sft_lora_results/lora_weights",
     projector_path="./qwen3_mol_sft_lora_results/projector.pt",
     merge_lora=True,
-    device="cuda" if torch.cuda.is_available() else "cpu"
+    device="cuda" if torch.cuda.is_available() else "cpu",
+    mol_config=None  # 新增：分子配置
 ):
     """
     加载LoRA微调的模型进行推理 - 修复设备一致性
     """
+    if base_model_path is None:
+        base_model_path = ModelConfig.DEFAULT_QWEN_PATH
+    
+    if mol_config is None:
+        mol_config = {
+            'num_queries': ModelConfig.NUM_QUERIES,
+            'input_dim': ModelConfig.INPUT_DIM,
+            'num_heads': ModelConfig.NUM_HEADS
+        }
+
     logger.info(f"Loading LoRA model for inference on {device}...")
     
-    # 1. 加载基础模型
-    model = Qwen3MoleculeLLM(qwen_model_name=base_model_path)
+    # 1. 加载基础模型，传入 mol_config
+    model = Qwen3MoleculeLLM(qwen_model_name=base_model_path, mol_config=mol_config)
     tokenizer = model.tokenizer
     
     # 2. 确保pad_token设置
@@ -619,7 +660,7 @@ def test_lora_inference(
     tokenizer,
     test_smiles=[["CC1[NH2+]CCC1C(=O)Nc1cc(C(N)=O)ccc1Cl"]],
     test_prompts=["Modify the molecule CC1[NH2+]CCC1C(=O)Nc1cc(C(N)=O)ccc1Cl by adding a carboxyl."],
-    max_new_tokens=200,
+    max_new_tokens=1024,
     temperature=0.7,
     top_p=0.9,
     device="cuda" if torch.cuda.is_available() else "cpu"
@@ -650,7 +691,7 @@ def test_lora_inference(
                 prompt,
                 padding=True,
                 truncation=True,
-                max_length=256,
+                max_length=2048,
                 return_tensors="pt"
             )
             
@@ -674,18 +715,20 @@ def test_lora_inference(
                     temperature=temperature,
                     top_p=top_p,
                     do_sample=True,
+      
                 )
             
             # 解码结果
+            print(generated_ids)
             generated_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
-            print(generated_text)
+            print("generate_text:",generated_text)
             
             # 提取生成的回答
             # if generated_text.startswith(prompt):
             #     answer = generated_text[len(prompt):].strip()
             # else:
             #     answer = generated_text
-            answer=generated_text[len(prompt)+66*5:].strip()
+            answer=generated_text[len(prompt)+130:].strip()
             
             logger.info(f"Generated response: {answer}")
             results.append({
@@ -830,17 +873,30 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="LoRA微调多模态分子-语言模型")
     parser.add_argument("--mode", type=str, choices=["train", "inference", "continue"], default="train", help="运行模式")
-    parser.add_argument("--model_path", type=str, default="./qwen3_4B_without_128_cot_new_rnx_mol_sft_lora_results_stage2", help="模型路径")
-    parser.add_argument("--data_path", type=str, default="/zengdaojian/zhangjia/BioLatent/ChemCotDataset/chemcotbench-cot", help="数据路径")
+    parser.add_argument("--model_path", type=str, default=ModelConfig.DEFAULT_OUTPUT_DIR, help="保存/加载模型的路径")
+    parser.add_argument("--data_path", type=str, default=ModelConfig.DEFAULT_DATA_PATH, help="数据路径")
     parser.add_argument("--batch_size", type=int, default=2, help="批次大小")
     parser.add_argument("--max_seq_length", type=int, default=512, help="最大序列长度")
     parser.add_argument("--epochs", type=int, default=3, help="训练轮数")
+    
+    # 分子模型超参数
+    parser.add_argument("--num_queries", type=int, default=ModelConfig.NUM_QUERIES, help="投影器查询向量数量")
+    parser.add_argument("--mol_input_dim", type=int, default=ModelConfig.INPUT_DIM, help="分子编码器输出维度")
+    parser.add_argument("--mol_num_heads", type=int, default=ModelConfig.NUM_HEADS, help="投影器注意力头数")
+    
     parser.add_argument("--resume_checkpoint", type=str, default=None, help="从检查点恢复训练")
     parser.add_argument("--wandb_project", type=str, default="qwen3-molecule-lora-sft", help="wandb项目名称")
     parser.add_argument("--wandb_run_name", type=str, default=None, help="wandb运行名称")
     parser.add_argument("--wandb_entity", type=str, default=None, help="wandb团队/实体名称")
     
     args = parser.parse_args()
+    
+    # 构建分子配置字典
+    mol_config = {
+        'num_queries': args.num_queries,
+        'input_dim': args.mol_input_dim,
+        'num_heads': args.mol_num_heads
+    }
     
     if args.mode == "train":
         # 第一轮训练（从头开始）
@@ -853,6 +909,7 @@ if __name__ == "__main__":
             wandb_project=args.wandb_project,
             wandb_run_name=args.wandb_run_name,
             wandb_entity=args.wandb_entity,
+            mol_config=mol_config,  # 传入配置
         )
         
         # 训练完成后测试
@@ -891,6 +948,7 @@ if __name__ == "__main__":
             wandb_project=args.wandb_project,
             wandb_run_name=args.wandb_run_name + "-stage2" if args.wandb_run_name else "qwen3-lora-sft-stage2",
             wandb_entity=args.wandb_entity,
+            mol_config=mol_config,  # 传入配置
         )
         
         logger.info("Second stage training completed!")
@@ -898,8 +956,10 @@ if __name__ == "__main__":
     elif args.mode == "inference":
         # 推理模式
         model, tokenizer = load_lora_model_for_inference(
+            base_model_path=None, # 会自动读取配置
             lora_weights_path=os.path.join(args.model_path, "lora_weights"),
-            projector_path=os.path.join(args.model_path, "projector.pt")
+            projector_path=os.path.join(args.model_path, "projector.pt"),
+            mol_config=mol_config # 传入配置
         )
         
         # 测试推理

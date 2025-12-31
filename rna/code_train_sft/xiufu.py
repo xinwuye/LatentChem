@@ -1,7 +1,9 @@
 import json
 import glob
+import os
 
-base_path = "/zengdaojian/zhangjia/BioLatent/ChemCotDataset"
+# 使用当前目录下的 ChemCotDataset
+base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../ChemCotDataset")
 files = glob.glob(f"{base_path}/**/*.json", recursive=True)
 
 target_keys = ["id", "query", "gt", "task", "subtask", "meta",

@@ -1,0 +1,24 @@
+2025-12-30 14:15:43,872 INFO    MainThread:20015 [wandb_setup.py:_flush():80] Current SDK version is 0.23.1
+2025-12-30 14:15:43,873 INFO    MainThread:20015 [wandb_setup.py:_flush():80] Configure stats pid to 20015
+2025-12-30 14:15:43,873 INFO    MainThread:20015 [wandb_setup.py:_flush():80] Loading settings from /root/.config/wandb/settings
+2025-12-30 14:15:43,873 INFO    MainThread:20015 [wandb_setup.py:_flush():80] Loading settings from /mnt/afs/L202500070/Bio-LatentCOT/code_train_sft/wandb/settings
+2025-12-30 14:15:43,873 INFO    MainThread:20015 [wandb_setup.py:_flush():80] Loading settings from environment variables
+2025-12-30 14:15:43,874 INFO    MainThread:20015 [wandb_init.py:setup_run_log_directory():714] Logging user logs to /mnt/afs/L202500070/Bio-LatentCOT/code_train_sft/wandb/offline-run-20251230_141543-gsh9wqqs/logs/debug.log
+2025-12-30 14:15:43,874 INFO    MainThread:20015 [wandb_init.py:setup_run_log_directory():715] Logging internal logs to /mnt/afs/L202500070/Bio-LatentCOT/code_train_sft/wandb/offline-run-20251230_141543-gsh9wqqs/logs/debug-internal.log
+2025-12-30 14:15:43,874 INFO    MainThread:20015 [wandb_init.py:init():841] calling init triggers
+2025-12-30 14:15:43,874 INFO    MainThread:20015 [wandb_init.py:init():846] wandb.init called with sweep_config: {}
+config: {'model_name': '/mnt/afs/L202500070/Bio-LatentCOT/models/Qwen3-8B-Base', 'data_path': '../ChemCotDataset/chemcotbench-cot', 'output_dir': './qwen3_mol_sft_lora_results', 'epochs': 3, 'batch_size': 2, 'learning_rate': 0.0002, 'max_seq_length': 512, 'training_strategy': 'LoRA-SFT', 'lora_r': 16, 'lora_alpha': 32, 'lora_dropout': 0.1, 'optimizer': 'adamw_8bit', 'mixed_precision': 'bf16', 'gradient_accumulation': 4, 'resume_from_checkpoint': None, 'lora_weights_path': None, 'projector_path': None, 'training_stage': 'first_stage', '_wandb': {}}
+2025-12-30 14:15:43,875 INFO    MainThread:20015 [wandb_init.py:init():889] starting backend
+2025-12-30 14:15:44,664 INFO    MainThread:20015 [wandb_init.py:init():892] sending inform_init request
+2025-12-30 14:15:44,707 INFO    MainThread:20015 [wandb_init.py:init():900] backend started and connected
+2025-12-30 14:15:44,714 INFO    MainThread:20015 [wandb_init.py:init():970] updated telemetry
+2025-12-30 14:15:44,786 INFO    MainThread:20015 [wandb_init.py:init():994] communicating run to backend with 90.0 second timeout
+2025-12-30 14:15:45,002 INFO    MainThread:20015 [wandb_init.py:init():1041] starting run threads in backend
+2025-12-30 14:15:45,736 INFO    MainThread:20015 [wandb_run.py:_console_start():2521] atexit reg
+2025-12-30 14:15:45,736 INFO    MainThread:20015 [wandb_run.py:_redirect():2369] redirect: wrap_raw
+2025-12-30 14:15:45,736 INFO    MainThread:20015 [wandb_run.py:_redirect():2438] Wrapping output streams.
+2025-12-30 14:15:45,736 INFO    MainThread:20015 [wandb_run.py:_redirect():2461] Redirects installed.
+2025-12-30 14:15:45,750 INFO    MainThread:20015 [wandb_init.py:init():1081] run started, returning control to user process
+2025-12-30 14:16:46,272 INFO    MainThread:20015 [wandb_run.py:_config_callback():1396] config_cb None None {'dataset_size': 23223, 'dataset_path': '../ChemCotDataset/chemcotbench-cot'}
+2025-12-30 14:16:54,590 INFO    wandb-AsyncioManager-main:20015 [service_client.py:_forward_responses():80] Reached EOF.
+2025-12-30 14:16:54,591 INFO    wandb-AsyncioManager-main:20015 [mailbox.py:close():137] Closing mailbox, abandoning 0 handles.
