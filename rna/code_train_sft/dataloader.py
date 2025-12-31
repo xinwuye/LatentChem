@@ -92,7 +92,7 @@ def llm_tokenize(example):
         max_length=MAX_LEN,
     )["input_ids"]
     prompt_len = len(prompt_ids)
-    labels[:prompt_len] = [-100] * prompt_len
+    labels[:prompt_len] = [-100] * prompt_len 
 
     return {
         "input_ids": input_ids,

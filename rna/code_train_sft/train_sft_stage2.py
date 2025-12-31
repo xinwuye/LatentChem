@@ -84,7 +84,7 @@ def get_collate_fn(num_queries):
     """
     根据 num_queries 动态生成对齐的 collate_fn
     """
-    smiles_len = num_queries + 2 # 自动计算对齐长度 (queries + start + end)
+    rna_len = num_queries + 2 # 自动计算对齐长度 (queries + start + end)
     
     def collate_fn(
         batch,
@@ -111,7 +111,7 @@ def get_collate_fn(num_queries):
             # 🚨 关键：labels 对齐 logits
             # 这里的 smiles_len 使用的是外部闭包中的变量
             labels.append(
-                [label_pad_id] * smiles_len +   # smiles + special tokens
+                [label_pad_id] * rna_len +   # smiles + special tokens
                 lab  +                         # answer labels
                 [label_pad_id] * pad_len         # padding
             )
@@ -120,7 +120,7 @@ def get_collate_fn(num_queries):
             "input_ids": torch.tensor(input_ids, dtype=torch.long),
             "attention_mask": torch.tensor(attention_mask, dtype=torch.long),
             "labels": torch.tensor(labels, dtype=torch.long),
-            "smiles": [[x["smiles"].replace(".", "")] for x in batch],
+            "rna_latent": [[x["rna_latent"].replace(".", "")] for x in batch],
         }
     
     return collate_fn
@@ -433,7 +433,7 @@ def train_sft_lora(
                     input_ids=test_batch["input_ids"],
                     attention_mask=test_batch["attention_mask"],
                     labels=test_batch["labels"],
-                    smiles=test_batch["smiles"]
+                    rna_embeddings=test_batch["rna_latent"]
                 )
 
             logger.info(f"Forward test successful!")
