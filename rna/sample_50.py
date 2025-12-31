@@ -29,7 +29,7 @@ def generate_sample():
 
     # 4. Extract specific columns for those indices
     # We select 'input', 'output', and 'response'
-    cols_to_keep = ['input', 'output', 'response']
+    cols_to_keep = ['task', 'output', 'response']
     
     # Check if columns exist
     missing_cols = [c for c in cols_to_keep if c not in df.columns]
