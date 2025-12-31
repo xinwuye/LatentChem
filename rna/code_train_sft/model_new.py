@@ -107,7 +107,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
                  mol_config,       # 🚨 必须传入配置字典
                  device_map=None):
         """
-        分子-文本多模态大语言模型
+        分子-文本多模态大语言模型 (RNA版)
         
         参数:
             qwen_model_name: Qwen基础模型路径
@@ -120,17 +120,15 @@ class Qwen3MoleculeLLM(PreTrainedModel):
 
         # 从 mol_config 解析参数
         self.num_queries = mol_config.get('num_queries', 128)
-        self.mol_input_dim = mol_config.get('input_dim', 768)
+        self.mol_input_dim = mol_config.get('input_dim', 640)
         self.mol_num_heads = mol_config.get('num_heads', 8)
-        self.smi_ted_folder = mol_config.get('smi_ted_folder', ModelConfig.DEFAULT_SMI_TED_FOLDER)
-        self.smi_ted_ckpt = mol_config.get('smi_ted_ckpt', ModelConfig.DEFAULT_SMI_TED_CKPT)
 
         # ---- 1. 加载预训练的Qwen LLM ----
         self.tokenizer = AutoTokenizer.from_pretrained(qwen_model_name)
         self.config._name_or_path = qwen_model_name
 
         # 添加分子特殊标记
-        self.extra_tokens = ["<mol_start>", "<mol_end>"]
+        self.extra_tokens = ["<bor>", "<eor>"] # 3 letters (beginning of rna, end of rna)
         self.tokenizer.add_tokens(self.extra_tokens)
 
         # 加载基础语言模型
@@ -144,24 +142,12 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         self.model.resize_token_embeddings(len(self.tokenizer))
         
         # 获取特殊标记的ID
-        self.start_id = self.tokenizer.convert_tokens_to_ids("<mol_start>")
-        self.end_id = self.tokenizer.convert_tokens_to_ids("<mol_end>")
+        self.start_id = self.tokenizer.convert_tokens_to_ids("<bor>")
+        self.end_id = self.tokenizer.convert_tokens_to_ids("<eor>")
 
         # 获取LLM的嵌入维度
         self.d_llm = self.model.get_input_embeddings().weight.shape[1]
 
-        # ---- 2. 分子编码器和投影器 ----
-        # 加载预训练的分子编码器（SMI-TED）
-        self.mol_encoder = load_smi_ted(
-            folder=self.smi_ted_folder,
-            ckpt_filename=self.smi_ted_ckpt
-        )
-        
-        # 冻结分子编码器参数
-        for param in self.mol_encoder.parameters():
-            param.requires_grad = False
-        self.mol_encoder.eval()
-        
         # 初始化投影器，使用动态解析的参数
         self.projector = QueryAttentionProjector(
             input_dim=self.mol_input_dim,
@@ -171,6 +157,12 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         )
         # 确保投影器类型与基础模型一致
         self.projector.to(self.model.dtype)
+    
+    def nest_rna_embeddings(rna_embeddings):
+        '''
+        Process RNA embeddings to a nested format used by LLM.
+        '''
+        return rna_embeddings
 
     def forward(
         self,
@@ -188,23 +180,23 @@ class Qwen3MoleculeLLM(PreTrainedModel):
     ):
         """
         重构后的前向传播：
-        1. 批量处理变长分子。
-        2. 动态拼接分子与文本（去Padding）。
-        3. 重新全局对齐与Loss计算。
+        1. 动态拼接RNA与文本（去Padding）。
+        2. 重新全局对齐与Loss计算。
         """
-        smiles_list = kwargs.pop("smiles", None)
-        if smiles_list is None:
-            raise ValueError("必须提供smiles参数")
+        rna_embeddings= kwargs.pop("rna", None)
+        if rna_embeddings is None:
+            raise ValueError("必须提供RNA embedding")
 
-        B = len(smiles_list)
+        B = len(rna_embeddings)
         device = self.model.device
 
         # =========================================================
         # 1. 分子特征拉平与批量投影 (优化性能)
         # =========================================================
-        with torch.no_grad():
-            # mol_emb_nested: [[Tensor(L1, 768), Tensor(L2, 768)], [Tensor(L3, 768)]]
-            mol_emb_nested = self.mol_encoder.encode(smiles_list)
+        # with torch.no_grad():
+        #     # mol_emb_nested: [[Tensor(L1, 768), Tensor(L2, 768)], [Tensor(L3, 768)]]
+        #     mol_emb_nested = self.mol_encoder.encode(smiles_list)
+        mol_emb_nested = nest_rna_embeddings(rna_embeddings)
 
         flat_mols = []
         mol_counts = []
@@ -250,7 +242,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         for b in range(B):
             # 2.1 构造分子部分
             sample_mol_parts = []
-            for _ in range(mol_counts[b]):
+            for _ in range(mol_counts[b]): # goine one molecule (inside nested list) at a time 
                 m_feat = flat_feats_llm[cursor].unsqueeze(0) # [1, num_queries, d_llm]
                 m_with_tags = torch.cat([start_emb, m_feat, end_emb], dim=1) # [1, num_queries+2, d_llm]
                 sample_mol_parts.append(m_with_tags)
@@ -378,13 +370,14 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         for b in range(B):
             # 2.1 构造分子部分
             sample_mol_parts = []
-            for _ in range(mol_counts[b]):
-                m_feat = flat_feats_llm[cursor].unsqueeze(0)
+            for _ in range(mol_counts[b]): # 一个分子一个分子去project
+                m_feat = flat_feats_llm[cursor].unsqueeze(0) # 用这个的projector
                 m_with_tags = torch.cat([start_emb, m_feat, end_emb], dim=1)
                 sample_mol_parts.append(m_with_tags)
                 cursor += 1
             
-            mol_part = torch.cat(sample_mol_parts, dim=1) if sample_mol_parts else torch.zeros(1, 0, self.d_llm, device=device, dtype=self.model.dtype)
+            mol_part = torch.cat(sample_mol_parts, dim=1) if sample_mol_parts else torch.zeros(1, 0, self.d_llm, device=device, dtype=self.model.dtype) 
+            # join multiple in molecules one embedding
 
             # 2.2 提取真实文本内容
             if attention_mask is not None:
@@ -433,43 +426,43 @@ class Qwen3MoleculeLLM(PreTrainedModel):
 # ============================
 # 3. 使用示例
 # ============================
-if __name__ == "__main__":
-    # 初始化模型
-    model = Qwen3MoleculeLLM(
-        qwen_model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B",
-    ).cuda()
+# if __name__ == "__main__":
+#     # 初始化模型
+#     model = Qwen3MoleculeLLM(
+#         qwen_model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B",
+#     ).cuda()
     
-    tokenizer = model.tokenizer
+#     tokenizer = model.tokenizer
 
-    # 示例文本
-    texts = [
-        "Please describe the functional groups of this molecule.",
-        "Please describe the functional groups of this molecule."
-    ]
+#     # 示例文本
+#     texts = [
+#         "Please describe the functional groups of this molecule.",
+#         "Please describe the functional groups of this molecule."
+#     ]
     
-    # 文本编码
-    enc = tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
-    input_ids = enc["input_ids"].cuda()
-    attention_mask = enc["attention_mask"].cuda()
+#     # 文本编码
+#     enc = tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
+#     input_ids = enc["input_ids"].cuda()
+#     attention_mask = enc["attention_mask"].cuda()
 
-    # 示例SMILES列表（每个样本包含3个分子）
-    smiles_list = [
-        ["CC(=O)OC1=CC=CC=C1C(=O)O", "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O", "C1=CC=C(C=C1)C=O"],  # 样本1的3个分子
-        ["CC(=O)OC1=CC=CC=C1C(=O)O", "C1=CC=C(C=C1)C=O"]   # 样本2的3个分子
-    ]
+#     # 示例SMILES列表（每个样本包含3个分子）
+#     smiles_list = [
+#         ["CC(=O)OC1=CC=CC=C1C(=O)O", "CC(C)CC1=CC=C(C=C1)C(C)C(=O)O", "C1=CC=C(C=C1)C=O"],  # 样本1的3个分子
+#         ["CC(=O)OC1=CC=CC=C1C(=O)O", "C1=CC=C(C=C1)C=O"]   # 样本2的3个分子
+#     ]
     
-    # 示例标签（实际训练时会来自数据集）
-    labels = [
-        "This molecule contains carboxylic acid and ester functional groups.",
-        "This molecule contains carboxylic acid and ester functional groups."
-    ]
+#     # 示例标签（实际训练时会来自数据集）
+#     labels = [
+#         "This molecule contains carboxylic acid and ester functional groups.",
+#         "This molecule contains carboxylic acid and ester functional groups."
+#     ]
 
-    # 前向传播
-    outputs = model(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        smiles=smiles_list
-    )
+#     # 前向传播
+#     outputs = model(
+#         input_ids=input_ids,
+#         attention_mask=attention_mask,
+#         smiles=smiles_list
+#     )
     
-    # 输出logits形状
-    print("模型输出logits形状:", outputs.logits.shape)
+#     # 输出logits形状
+#     print("模型输出logits形状:", outputs.logits.shape)
