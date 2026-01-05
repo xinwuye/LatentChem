@@ -41,6 +41,8 @@ Follow these steps:
    ```bash
    export HF_ENDPOINT=https://hf-mirror.com   # Use HF mirror (if not already set) if you need it in China
 
+   export HF_TOKEN=hf_<your_token>
+
    huggingface-cli download --resume-download OpenMol/ChemCoTDataset --repo-type dataset --local-dir ./ChemCotDataset
    ```                                    
 

@@ -31,7 +31,17 @@ def train_coconut():
     parser.add_argument("--c_thought", type=int, default=2, help="Number of latent tokens per CoT step")
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--grad_accum", type=int, default=4)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    # parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=5e-5, help="Learning rate")
+    parser.add_argument("--lora_r", type=int, default=16, help="LoRA rank")
+    parser.add_argument("--lora_alpha", type=int, default=32, help="LoRA alpha")
+    parser.add_argument(
+        "--finetuned_layers",
+        type=str,
+        default="all-linear",
+        help="LoRA target modules: 'all-linear' or comma-separated list (e.g. q_proj,v_proj)"
+    )
+
     parser.add_argument("--max_seq_length", type=int, default=8192)
     parser.add_argument("--save_full_model", type=lambda x: (str(x).lower() == 'true'), default=False, help="Whether to save full model weights (default False to save space)")
     
@@ -54,6 +64,11 @@ def train_coconut():
         logger.info(f"STARTING COCONUT STAGE {stage}")
         logger.info(f"Replace first {stage} steps with {stage * args.c_thought} latents")
         logger.info("🚀" * 30 + "\n")
+        logger.info(f"LoRA rank: {args.lora_r}")
+        logger.info(f"LoRA alpha: {args.lora_alpha}")
+        logger.info(f"Finetuned layers: {args.finetuned_layers}")
+        logger.info(f"Learning rate: {args.lr}")
+
 
         # 2.1 每一个 Stage 彻底重新初始化模型（为了彻底重置优化器和梯度状态）
         model = Qwen3MoleculeLLM(qwen_model_name=ModelConfig.DEFAULT_QWEN_PATH, mol_config=mol_config)
@@ -70,15 +85,26 @@ def train_coconut():
             # 首先冻结所有参数
             for param in model.parameters():
                 param.requires_grad = False
-            
-            lora_config = LoraConfig(
-                task_type=TaskType.CAUSAL_LM,
-                r=16,
-                lora_alpha=32,
-                lora_dropout=0.1,
-                target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-                bias="none",
-            )
+        
+        if args.finetuned_layers == "all-linear":
+            target_modules = [
+                "q_proj", "k_proj", "v_proj", "o_proj",
+                "gate_proj", "up_proj", "down_proj"
+            ]
+        else:
+            target_modules = [m.strip() for m in args.finetuned_layers.split(",")]
+
+
+        lora_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=0.1,
+            target_modules=target_modules,
+            bias="none",
+        )
+
+
             model.model = get_peft_model(model.model, lora_config)
         
         # 确保投影器可训练
@@ -129,7 +155,11 @@ def train_coconut():
             project="qwen3-molecule-coconut",
             name=f"coconut-stage-{stage}-{datetime.now().strftime('%m%d-%H%M')}",
             mode="offline",
-            config={**vars(args), "current_stage": stage}
+            config={
+                **vars(args),
+                "current_stage": stage,
+                "resolved_target_modules": target_modules,
+            }
         )
 
         data_collator = MultiModalDataCollator(tokenizer=tokenizer, model=model.model, padding=True)
