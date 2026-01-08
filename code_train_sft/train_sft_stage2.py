@@ -755,10 +755,9 @@ def run_inference_on_test_data(
             generated_text = tokenizer.decode(gen0, skip_special_tokens=True)
 
             result = {
-                "sample_id": idx * num_procs + proc_index,
+                "sample_id": idx,
                 "smiles": smiles_list,
                 "result": generated_text.strip(),
-                # eval 模式下 ground truth 已为 None（或原数据中存在时仍可访问）
                 "task": item.get("task", None)
             }
             results.append(result)
@@ -810,6 +809,188 @@ def run_inference_on_test_data(
 
     return results
 
+def load_vllm_model_for_inference(
+    merged_model_path,
+    projector_path,
+    device,
+    mol_config = None,
+    tensor_parallel_size = 1,
+    gpu_memory_utilization = 0.7
+):
+    if mol_config is None:
+        mol_config = {
+            'num_queries': ModelConfig.NUM_QUERIES,
+            'input_dim': ModelConfig.INPUT_DIM,
+            'num_heads': ModelConfig.NUM_HEADS
+        }
+    
+    logger.info(f"Loading VLLM model for inference on {device}...")
+
+    model = Qwen3MoleculeLLM(qwen_model_name=merged_model_path, mol_config=mol_config, vllm=True, tensor_parallel_size=tensor_parallel_size, gpu_memory_utilization=gpu_memory_utilization)
+    tokenizer = model.tokenizer
+    
+    if os.path.exists(projector_path):
+        # 加载时指定map_location
+        projector_state_dict = torch.load(projector_path, map_location=device)
+        model.projector.load_state_dict(projector_state_dict)
+        logger.info(f"Loaded projector weights to {device} from: {projector_path}")
+        model.projector = model.projector.to(device)
+    
+    logger.info(f"vLLM model loaded for inference")
+
+    return model, tokenizer
+
+def run_inference_vllm(
+    model,
+    tokenizer,
+    test_data_path,
+    max_new_tokens=2048,
+    temperature=0.7,
+    top_p=0.9,
+    sample_count=1,
+    save_results_path=None,
+    max_samples=None,
+    tokenization_max_len=None,
+):
+    logger.info(f"Running inference on test data from {test_data_path}")
+    
+    # 加载并 tokenized 的 eval dataset
+    dataset = load_test_data(test_data_path, max_len=tokenization_max_len)
+
+    # 限制样本数量
+    if max_samples is not None and max_samples < len(dataset):
+        dataset = dataset.select(range(max_samples))
+        
+    logger.info(f"Number of eval samples to run: {len(dataset)}")
+    
+    # -------------------------------------------------------
+    # 1. 数据准备阶段 (Data Preparation)
+    # -------------------------------------------------------
+    # 目标：将 dataset 拆解为接口所需的三个大列表 (Lists)
+    
+    all_smiles_list: List[List[str]] = []
+    all_input_ids: List[torch.Tensor] = []
+    all_attention_mask: List[torch.Tensor] = []
+    
+    # 用于结果回填的元数据
+    metadata_list: List[Dict[str, Any]] = []
+
+    print(f"Preparing inputs for {len(dataset)} samples...")
+    
+    for idx, item in enumerate(dataset):
+        raw_smiles = item.get("smiles", []) or []
+        cleaned_smiles = [s.replace(".", "").strip() for s in raw_smiles]
+        
+        # 确保转换为 1D Tensor (L,)，不需要 batch 维度
+        inp = item["input_ids"]
+        if isinstance(inp, list):
+            inp_tensor = torch.tensor(inp, dtype=torch.long)
+        elif isinstance(inp, torch.Tensor):
+            inp_tensor = inp.clone().detach()
+        else:
+            # 防御性编程
+            inp_tensor = torch.tensor(list(inp), dtype=torch.long)
+            
+        # 确保是 1D [L]
+        if inp_tensor.dim() > 1:
+            inp_tensor = inp_tensor.view(-1)
+            
+        # 1.3 处理 Attention Mask
+        mask = item["attention_mask"]
+        if isinstance(mask, list):
+            mask_tensor = torch.tensor(mask, dtype=torch.long)
+        elif isinstance(mask, torch.Tensor):
+            mask_tensor = mask.clone().detach()
+        else:
+            mask_tensor = torch.tensor(list(mask), dtype=torch.long)
+            
+        # 确保是 1D [L]
+        if mask_tensor.dim() > 1:
+            mask_tensor = mask_tensor.view(-1)
+
+        # 1.4 存入列表
+        all_smiles_list.append(cleaned_smiles)
+        all_input_ids.append(inp_tensor)
+        all_attention_mask.append(mask_tensor)
+        
+        # 记录元数据，以便后续拼装结果
+        metadata_list.append({
+            "sample_id": idx, # 或 item.get('id')
+            "original_smiles": raw_smiles,
+            "task": item.get("task", None)
+        })
+
+    # -------------------------------------------------------
+    # 2. 推理阶段 (Inference Phase)
+    # -------------------------------------------------------
+    # 直接调用你的接口，传入整包数据
+    # 接口内部会处理 padding 和 mini-batching，我们无需操心
+    
+    print(f"Starting batch inference via generate_vllm...")
+    
+    batch_outputs = model.generate_vllm(
+        smiles_list=all_smiles_list,
+        input_ids=all_input_ids,
+        attention_mask=all_attention_mask,
+        sample_count=sample_count,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        embed_batch_size=32,
+        use_tqdm=True
+    )
+
+    # -------------------------------------------------------
+    # 3. 结果重组 (Result Assembly)
+    # -------------------------------------------------------
+    
+    results = []
+    
+    for meta, output_strs in zip(metadata_list, batch_outputs):
+        result_item = {
+            "sample_id": meta["sample_id"],
+            "smiles": meta["original_smiles"],
+            "task": meta["task"]
+        }
+        if sample_count > 1:
+            generated_texts = output_strs if output_strs else [""] * sample_count
+            result_item['results'] = generated_texts
+        else:
+            generated_text = output_strs[0] if output_strs else ""
+            result_item['results'] = generated_text
+        
+        results.append(result_item)
+
+    if save_results_path:
+        from datetime import datetime
+
+        save_data = {
+            "timestamp": datetime.now().isoformat(),
+            "test_data_path": test_data_path,
+            # fill in vllm info later
+            # "model_info": {
+            #     "device": str(device),
+            #     "total_parameters": sum(p.numel() for p in model.parameters()),
+            #     "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
+            # },
+            "generation_config": {
+                "max_new_tokens": max_new_tokens,
+                "temperature": temperature,
+                "top_p": top_p,
+                "sample_count": sample_count
+            },
+            "num_samples": len(results),
+            "test_results": results
+        }
+
+        os.makedirs(os.path.dirname(save_results_path) if os.path.dirname(save_results_path) else ".", exist_ok=True)
+        with open(save_results_path, 'w', encoding='utf-8') as f:
+            json.dump(save_data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"Results saved to: {save_results_path}")
+    
+    return results
+    
 # 主函数 - 修改以支持第二轮训练
 if __name__ == "__main__":
     import argparse
@@ -827,6 +1008,7 @@ if __name__ == "__main__":
     # 权重加载参数
     parser.add_argument("--lora_path", type=str, default=None, help="预训练 LoRA 权重路径")
     parser.add_argument("--projector_path", type=str, default=None, help="预训练投影器权重路径")
+    parser.add_argument("--merged_model_path", type=str, default=None, help="预训练合并模型权重路径")
 
     # 分子模型超参数
     parser.add_argument("--num_queries", type=int, default=ModelConfig.NUM_QUERIES, help="投影器查询向量数量")
@@ -845,7 +1027,9 @@ if __name__ == "__main__":
     parser.add_argument("--top_p", type=float, default=0.9, help="top-p采样参数（用于inference模式）")
     parser.add_argument("--max_test_samples", type=int, default=None, help="最大测试样本数，None表示全部测试（用于inference模式）")
     parser.add_argument("--inference_results_path", type=str, default=None, help="推理结果保存路径（用于inference模式）")
+    parser.add_argument("--sample_count", type=int, default=1, help="每个样本生成的文本数量（用于inference模式）")
     
+    # naive inference only
     parser.add_argument("--proc_index", type=int, default=0,
                     help="当前进程索引 (0-based)，用于样本分片")
     parser.add_argument("--num_procs", type=int, default=1,
@@ -910,20 +1094,12 @@ if __name__ == "__main__":
         else:
             device = torch.device("cpu")
 
-        # 设置当前 cuda device（当使用 cuda 时）
-        if device.type == "cuda":
-            try:
-                torch.cuda.set_device(device.index)
-            except Exception:
-                # 某些环境下 device.index 可能为 None，忽略
-                pass
-
         model, tokenizer = load_lora_model_for_inference(
             base_model_path=None,
             lora_weights_path=lora_path,
             projector_path=projector_path,
             mol_config=mol_config,
-            device=device,           # 重要：显式传 device
+            device=device,
             merge_lora=True
         )
         
@@ -940,7 +1116,48 @@ if __name__ == "__main__":
             tokenization_max_len=min(args.max_seq_length, ModelConfig.MAX_TEXT_LEN),
             proc_index=args.proc_index,
             num_procs=args.num_procs,
-        device=device
+            device=device
         )
 
         logger.info("Inference completed!")
+    
+    elif args.mode == "vllm":
+        logger.info(f"Starting vLLM inference mode...")
+        
+        merged_model_path = args.merged_model_path or os.path.join(args.output_dir, "merged")
+        projector_path = args.projector_path or os.path.join(args.output_dir, "projector.pt")
+        
+        # 确定测试数据路径
+        test_data_path = args.test_data_path or args.data_path
+        if not test_data_path:
+            raise ValueError("Please specify test data path using --test_data_path or --data_path")
+
+        # 确定结果保存路径
+        if args.inference_results_path:
+            results_path = args.inference_results_path
+        else:
+            from datetime import datetime
+            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            results_path = os.path.join(args.output_dir, f"inference_results_{timestamp}.json")
+            
+        model, tokenizer = load_vllm_model_for_inference(
+            merged_model_path=merged_model_path,
+            projector_path=projector_path,
+            device="cuda" if torch.cuda.is_available() else "cpu",
+            mol_config=mol_config,
+            tensor_parallel_size=torch.cuda.device_count()
+        )
+        
+        run_inference_vllm(
+            model=model,
+            tokenizer=tokenizer,
+            test_data_path=test_data_path,
+            save_results_path=results_path,
+            max_new_tokens=args.max_new_tokens,
+            temperature=args.temperature,
+            top_p=args.top_p,
+            max_samples=args.max_test_samples,
+            sample_count=args.sample_count,
+            tokenization_max_len=min(args.max_seq_length, ModelConfig.MAX_TEXT_LEN),
+        )
+        

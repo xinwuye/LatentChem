@@ -1,10 +1,13 @@
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pad_sequence
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PretrainedConfig
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from safetensors.torch import load_file
 import sys
 import os
 from config import ModelConfig
+from vllm import LLM, SamplingParams
 
 # 动态添加路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -105,7 +108,9 @@ class Qwen3MoleculeLLM(PreTrainedModel):
     def __init__(self, 
                  qwen_model_name,
                  mol_config,       # 🚨 必须传入配置字典
-                 device_map=None):
+                 vllm=False,
+                 device_map=None,
+                 **kwargs):
         """
         分子-文本多模态大语言模型
         
@@ -125,23 +130,42 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         self.smi_ted_folder = mol_config.get('smi_ted_folder', ModelConfig.DEFAULT_SMI_TED_FOLDER)
         self.smi_ted_ckpt = mol_config.get('smi_ted_ckpt', ModelConfig.DEFAULT_SMI_TED_CKPT)
 
-        # ---- 1. 加载预训练的Qwen LLM ----
-        self.tokenizer = AutoTokenizer.from_pretrained(qwen_model_name)
-        self.config._name_or_path = qwen_model_name
+        # In the vllm pipeline, we merge the lora weights into the model for vllm
+        #   and use extracted tokenizer and embedding layer for embedding fusing
+        if vllm:
+            # load extracted tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(qwen_model_name)
+            self.config._name_or_path = qwen_model_name
+            
+            # load extracted embedding layer
+            state_dict = load_file(f"{qwen_model_name}/embeddings.safetensors")
+            weights = state_dict["weight"]
+            vocab_size, hidden_size = weights.shape
+            self.embedding_layer = nn.Embedding(vocab_size, hidden_size)
+            self.embedding_layer.weight.data = weights
+            
+            self.vllm = LLM(model=qwen_model_name, dtype="float32", enable_prompt_embeds=True, **kwargs)
+            self.model = None
+        else:
+            # ---- 1. 加载预训练的Qwen LLM ----
+            self.tokenizer = AutoTokenizer.from_pretrained(qwen_model_name)
+            self.config._name_or_path = qwen_model_name
 
-        # 添加分子特殊标记
-        self.extra_tokens = ["<mol_start>", "<mol_end>", "<latent>", "<start_latent>", "<end_latent>"]
-        self.tokenizer.add_tokens(self.extra_tokens)
+            # 添加分子特殊标记
+            self.extra_tokens = ["<mol_start>", "<mol_end>", "<latent>", "<start_latent>", "<end_latent>"]
+            self.tokenizer.add_tokens(self.extra_tokens)
 
-        # 加载基础语言模型
-        self.model = AutoModelForCausalLM.from_pretrained(
-            qwen_model_name,
-            torch_dtype=torch.float32,
-            device_map=device_map
-        )
-        
-        # 调整词表大小以包含新添加的特殊标记
-        self.model.resize_token_embeddings(len(self.tokenizer))
+            # 加载基础语言模型
+            self.model = AutoModelForCausalLM.from_pretrained(
+                qwen_model_name,
+                torch_dtype=torch.float32,
+                device_map=device_map
+            )
+            
+            # 调整词表大小以包含新添加的特殊标记
+            self.model.resize_token_embeddings(len(self.tokenizer))
+            self.vllm = None
+            self.embedding_layer = None
         
         # 获取特殊标记的ID
         self.start_id = self.tokenizer.convert_tokens_to_ids("<mol_start>")
@@ -173,7 +197,8 @@ class Qwen3MoleculeLLM(PreTrainedModel):
             num_heads=self.mol_num_heads
         )
         # 确保投影器类型与基础模型一致
-        self.projector.to(self.model.dtype)
+        if not vllm:
+            self.projector.to(self.model.dtype)
 
     def gradient_checkpointing_enable(self, **kwargs):
         """
@@ -397,6 +422,121 @@ class Qwen3MoleculeLLM(PreTrainedModel):
             attentions=outputs.attentions,
         )
 
+    @torch.no_grad()
+    def generate_vllm(
+        self,
+        smiles_list: List[List[str]],
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        max_new_tokens: int = 200,
+        temperature: float = 0.7,
+        top_p: float = 0.9,
+        sample_count: int = 1,
+        embed_batch_size: int = 32,
+        **kwargs,
+    )->List[List[str]]:
+
+        device = self.embedding_layer.weight.device
+        dtype = self.embedding_layer.weight.dtype
+
+        B = input_ids.size(0)
+        B = input_ids.size(0)
+
+        # =========================================================
+        # 1. 分子特征拉平与批量投影
+        # =========================================================
+        # mol_emb_nested: [[Tensor(L1, 768), ...], ...]
+        mol_emb_nested = self.mol_encoder.encode(smiles_list)
+
+        flat_mols = []
+        mol_counts = []
+        for sample_mols in mol_emb_nested:
+            mol_counts.append(len(sample_mols))
+            flat_mols.extend(sample_mols)
+
+        if flat_mols:
+            max_L_mol = max(m.size(0) for m in flat_mols)
+            padded_mols = torch.zeros(len(flat_mols), max_L_mol, self.mol_input_dim, device=device, dtype=self.model.dtype)
+            mol_key_padding_mask = torch.ones(len(flat_mols), max_L_mol, device=device, dtype=torch.bool)
+            
+            for i, m in enumerate(flat_mols):
+                curr_L = m.size(0)
+                padded_mols[i, :curr_L] = m.to(device=device, dtype=self.model.dtype)
+                mol_key_padding_mask[i, :curr_L] = False
+            
+            flat_feats_llm = self.projector(padded_mols, key_padding_mask=mol_key_padding_mask)
+        else:
+            flat_feats_llm = []
+
+        # 获取 LLM 嵌入层
+        embed = self.embedding_layer
+        start_emb = embed(torch.tensor([[self.start_id]], device=device))
+        end_emb = embed(torch.tensor([[self.end_id]], device=device))
+
+        # =========================================================
+        # 2. 结构还原与变长融合 (去文本 Padding)
+        # =========================================================
+        text_emb = []
+        
+        # 按 embed_batch_size 进行切分循环
+        for i in range(0, B, embed_batch_size):
+            batch_input_ids = input_ids[i : i + embed_batch_size]
+            lengths = [x.size(0) for x in batch_input_ids]
+            
+            batch_padded = pad_sequence([x.to(device) for x in batch_input_ids], batch_first=True, padding_value=0)
+            batch_emb = embed(batch_padded).to(dtype=dtype)
+            
+            for j, length in enumerate(lengths):
+                text_emb.append(batch_emb[j, :length])
+        
+        fused_samples_list = []
+        cursor = 0
+
+        for b in range(B):
+            # 2.1 构造分子部分
+            sample_mol_parts = []
+            for _ in range(mol_counts[b]):
+                m_feat = flat_feats_llm[cursor].unsqueeze(0)
+                m_with_tags = torch.cat([start_emb, m_feat, end_emb], dim=1)
+                sample_mol_parts.append(m_with_tags)
+                cursor += 1
+            
+            mol_part = torch.cat(sample_mol_parts, dim=1) if sample_mol_parts else torch.zeros(1, 0, self.d_llm, device=device, dtype=self.model.dtype)
+
+            # 2.2 提取真实文本内容
+            if attention_mask is not None:
+                non_pad_indices = attention_mask[b].bool()
+                t_emb = text_emb[b][non_pad_indices]
+            else:
+                t_emb = text_emb[b]
+
+            # 2.3 融合
+            sample_fused = torch.cat([mol_part, t_emb.unsqueeze(0)], dim=1)
+            fused_samples_list.append(sample_fused)
+        
+        # TODO: refactor and extract the fuse logic to a separate function
+        
+        # 3. construct requests for vllm
+        prompts = [{"prompt_embeds": sample_fused} for sample_fused in fused_samples_list]
+        sampling_params = SamplingParams(
+            temperature = temperature,
+            top_p = top_p,
+            max_tokens = max_new_tokens,
+            n = sample_count,
+            **kwargs
+        )
+        
+        vllm_outputs = self.vllm.generate(prompts, sampling_params)
+        
+        return [
+            [
+                sample_output.text
+                for sample_output in request_outputs
+            ]
+            for request_outputs in vllm_outputs
+        ]
+    
+    
     @torch.no_grad()
     def generate(
         self,
