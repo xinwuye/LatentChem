@@ -130,7 +130,7 @@ echo "$(date +'%Y-%m-%d %H:%M:%S') - Launching inference..." | tee -a "${LOG_FIL
 
 INFER_CMD=(
   "${PYTHON_BIN}" "${SCRIPT_PATH}"
-  --mode inference
+  --mode vllm
   --output_dir "${OUTPUT_DIR}"
   --data_path "${DATA_PATH}"
   --lora_path "${LORA_PATH}"

@@ -824,7 +824,7 @@ def load_vllm_model_for_inference(
             'num_heads': ModelConfig.NUM_HEADS
         }
     
-    logger.info(f"Loading VLLM model for inference on {device}...")
+    logger.info(f"Loading vLLM model for inference on {device}...")
 
     model = Qwen3MoleculeLLM(qwen_model_name=merged_model_path, mol_config=mol_config, vllm=True, tensor_parallel_size=tensor_parallel_size, gpu_memory_utilization=gpu_memory_utilization)
     tokenizer = model.tokenizer
@@ -996,7 +996,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="LoRA微调多模态分子-语言模型")
-    parser.add_argument("--mode", type=str, choices=["train", "inference"], default="train", help="运行模式")
+    parser.add_argument("--mode", type=str, choices=["train", "inference", "vllm"], default="train", help="运行模式")
     parser.add_argument("--output_dir", type=str, default=ModelConfig.DEFAULT_OUTPUT_DIR, help="保存/加载模型的路径")
     parser.add_argument("--data_path", type=str, default=ModelConfig.DEFAULT_DATA_PATH, help="数据路径")
     parser.add_argument("--batch_size", type=int, default=2, help="批次大小")

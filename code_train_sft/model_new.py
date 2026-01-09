@@ -144,7 +144,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
             self.embedding_layer = nn.Embedding(vocab_size, hidden_size)
             self.embedding_layer.weight.data = weights
             
-            self.vllm = LLM(model=qwen_model_name, dtype="float32", enable_prompt_embeds=True, **kwargs)
+            self.vllm = LLM(model=qwen_model_name, dtype="bf16", enable_prompt_embeds=True, **kwargs)
             self.model = None
         else:
             # ---- 1. 加载预训练的Qwen LLM ----

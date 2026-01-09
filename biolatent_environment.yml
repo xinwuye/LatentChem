@@ -272,7 +272,8 @@ dependencies:
       - urllib3==2.2.2
       - uvicorn==0.30.1
       - uvloop==0.19.0
-      - vllm==0.9.1
+      # vllm 0.9 series buggy, while 0.8.5 don't support embed input
+      - vllm==0.10.2
       # - vllm-flash-attn==2.5.9
       - waitress==3.0.2
       - watchfiles==0.22.0

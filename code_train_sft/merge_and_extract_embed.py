@@ -17,14 +17,17 @@ output_dir = args.output_dir
 
 config = PretrainedConfig.from_pretrained(qwen_model_name)
 
-tokenizer = AutoTokenizer.from_pretrained(qwen_model_name)
+try:
+    tokenizer = AutoTokenizer.from_pretrained(qwen_model_name, fix_mistral_regex=True)
+except:
+    tokenizer = AutoTokenizer.from_pretrained(qwen_model_name)
 
 extra_tokens = ["<mol_start>", "<mol_end>", "<latent>", "<start_latent>", "<end_latent>"]
 tokenizer.add_tokens(extra_tokens)
 
 model = AutoModelForCausalLM.from_pretrained(
     qwen_model_name,
-    torch_dtype=torch.float32,
+    torch_dtype=torch.bfloat16,
 )
 
 model.resize_token_embeddings(len(tokenizer))
