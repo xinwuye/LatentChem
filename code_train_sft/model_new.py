@@ -18,6 +18,7 @@ import torch.nn.functional as F
 from transformers.generation.utils import GenerationConfig
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from typing import Optional
+from tqdm import tqdm
 
 import torch
 from typing import List, Optional
@@ -144,8 +145,10 @@ class Qwen3MoleculeLLM(PreTrainedModel):
             self.embedding_layer = nn.Embedding(vocab_size, hidden_size)
             self.embedding_layer.weight.data = weights
             
-            self.vllm = LLM(model=qwen_model_name, dtype="bf16", enable_prompt_embeds=True, **kwargs)
+            # lazy init
+            self.vllm = None
             self.model = None
+            self.d_llm = self.embedding_layer.weight.shape[1]
         else:
             # ---- 1. 加载预训练的Qwen LLM ----
             self.tokenizer = AutoTokenizer.from_pretrained(qwen_model_name)
@@ -166,6 +169,9 @@ class Qwen3MoleculeLLM(PreTrainedModel):
             self.model.resize_token_embeddings(len(self.tokenizer))
             self.vllm = None
             self.embedding_layer = None
+            self.d_llm = self.model.get_input_embeddings().weight.shape[1]
+        
+        self.qwen_model_name = qwen_model_name 
         
         # 获取特殊标记的ID
         self.start_id = self.tokenizer.convert_tokens_to_ids("<mol_start>")
@@ -173,9 +179,6 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         self.latent_id = self.tokenizer.convert_tokens_to_ids("<latent>")
         self.start_latent_id = self.tokenizer.convert_tokens_to_ids("<start_latent>")
         self.end_latent_id = self.tokenizer.convert_tokens_to_ids("<end_latent>")
-
-        # 获取LLM的嵌入维度
-        self.d_llm = self.model.get_input_embeddings().weight.shape[1]
 
         # ---- 2. 分子编码器和投影器 ----
         # 加载预训练的分子编码器（SMI-TED）
@@ -428,6 +431,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         smiles_list: List[List[str]],
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
+        projector_device = None,
         max_new_tokens: int = 200,
         temperature: float = 0.7,
         top_p: float = 0.9,
@@ -439,8 +443,8 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         device = self.embedding_layer.weight.device
         dtype = self.embedding_layer.weight.dtype
 
-        B = input_ids.size(0)
-        B = input_ids.size(0)
+        # this is a list, not stacked tensor
+        B = len(input_ids)
 
         # =========================================================
         # 1. 分子特征拉平与批量投影
@@ -456,15 +460,18 @@ class Qwen3MoleculeLLM(PreTrainedModel):
 
         if flat_mols:
             max_L_mol = max(m.size(0) for m in flat_mols)
-            padded_mols = torch.zeros(len(flat_mols), max_L_mol, self.mol_input_dim, device=device, dtype=self.model.dtype)
+            padded_mols = torch.zeros(len(flat_mols), max_L_mol, self.mol_input_dim, device=device, dtype=dtype)
             mol_key_padding_mask = torch.ones(len(flat_mols), max_L_mol, device=device, dtype=torch.bool)
             
             for i, m in enumerate(flat_mols):
                 curr_L = m.size(0)
-                padded_mols[i, :curr_L] = m.to(device=device, dtype=self.model.dtype)
+                padded_mols[i, :curr_L] = m.to(device=device, dtype=dtype)
                 mol_key_padding_mask[i, :curr_L] = False
             
+            padded_mols = padded_mols.to(device=projector_device, dtype=dtype)
+            mol_key_padding_mask = mol_key_padding_mask.to(device=projector_device, dtype=torch.bool)
             flat_feats_llm = self.projector(padded_mols, key_padding_mask=mol_key_padding_mask)
+            flat_feats_llm = flat_feats_llm.to(device=device, dtype=dtype)
         else:
             flat_feats_llm = []
 
@@ -479,7 +486,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         text_emb = []
         
         # 按 embed_batch_size 进行切分循环
-        for i in range(0, B, embed_batch_size):
+        for i in tqdm(range(0, B, embed_batch_size), "embedding text prompts"):
             batch_input_ids = input_ids[i : i + embed_batch_size]
             lengths = [x.size(0) for x in batch_input_ids]
             
@@ -501,7 +508,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
                 sample_mol_parts.append(m_with_tags)
                 cursor += 1
             
-            mol_part = torch.cat(sample_mol_parts, dim=1) if sample_mol_parts else torch.zeros(1, 0, self.d_llm, device=device, dtype=self.model.dtype)
+            mol_part = torch.cat(sample_mol_parts, dim=1) if sample_mol_parts else torch.zeros(1, 0, self.d_llm, device=device, dtype=dtype)
 
             # 2.2 提取真实文本内容
             if attention_mask is not None:
@@ -516,17 +523,18 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         
         # TODO: refactor and extract the fuse logic to a separate function
         
+        self.vllm = LLM(model=self.qwen_model_name, dtype="bfloat16", enable_prompt_embeds=True)
+        
         # 3. construct requests for vllm
         prompts = [{"prompt_embeds": sample_fused} for sample_fused in fused_samples_list]
         sampling_params = SamplingParams(
             temperature = temperature,
             top_p = top_p,
             max_tokens = max_new_tokens,
-            n = sample_count,
-            **kwargs
+            n = sample_count
         )
         
-        vllm_outputs = self.vllm.generate(prompts, sampling_params)
+        vllm_outputs = self.vllm.generate(prompts, sampling_params, **kwargs)
         
         return [
             [

@@ -667,9 +667,14 @@ def load_test_data(test_data_path, max_len=None):
     # 情况1：目录（推荐）
     if os.path.isdir(test_data_path):
         # 直接使用 load_data 的 eval_mode
-        dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, exclude_tasks=['rcr', 'mechsel'], max_len=max_len)
-        logger.info(f"Loaded tokenized eval dataset from dir: {len(dataset)} examples")
-        return dataset
+        if 'ChemCoTBench' in test_data_path:
+            dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, exclude_tasks=['rcr', 'mechsel'], max_len=max_len)
+            logger.info(f"Loaded tokenized eval dataset from dir: {len(dataset)} examples")
+            return dataset
+        elif 'ChemLLMBench' in test_data_path:
+            dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, exclude_tasks=['name_prediction', 'property_prediction', 'yield_prediction'], max_len=max_len)
+            logger.info(f"Loaded tokenized eval dataset from dir: {len(dataset)} examples")
+            return dataset
     
 def run_inference_on_test_data(
     model,
@@ -815,7 +820,7 @@ def load_vllm_model_for_inference(
     device,
     mol_config = None,
     tensor_parallel_size = 1,
-    gpu_memory_utilization = 0.7
+    gpu_memory_utilization = 0.3
 ):
     if mol_config is None:
         mol_config = {
@@ -834,9 +839,12 @@ def load_vllm_model_for_inference(
         projector_state_dict = torch.load(projector_path, map_location=device)
         model.projector.load_state_dict(projector_state_dict)
         logger.info(f"Loaded projector weights to {device} from: {projector_path}")
-        model.projector = model.projector.to(device)
+        model.projector = model.projector.to(device=device, dtype=torch.bfloat16)
     
-    logger.info(f"vLLM model loaded for inference")
+    logger.info("mol_encoder device:")
+    logger.info(next(model.mol_encoder.encoder.parameters()).device)
+    
+    logger.info(f"vLLM model lazy loaded for inference")
 
     return model, tokenizer
 
@@ -844,6 +852,7 @@ def run_inference_vllm(
     model,
     tokenizer,
     test_data_path,
+    projector_device,
     max_new_tokens=2048,
     temperature=0.7,
     top_p=0.9,
@@ -875,7 +884,7 @@ def run_inference_vllm(
     # 用于结果回填的元数据
     metadata_list: List[Dict[str, Any]] = []
 
-    print(f"Preparing inputs for {len(dataset)} samples...")
+    logger.info(f"Preparing inputs for {len(dataset)} samples...")
     
     for idx, item in enumerate(dataset):
         raw_smiles = item.get("smiles", []) or []
@@ -926,12 +935,13 @@ def run_inference_vllm(
     # 直接调用你的接口，传入整包数据
     # 接口内部会处理 padding 和 mini-batching，我们无需操心
     
-    print(f"Starting batch inference via generate_vllm...")
+    logger.info(f"Starting batch inference via generate_vllm...")
     
     batch_outputs = model.generate_vllm(
         smiles_list=all_smiles_list,
         input_ids=all_input_ids,
         attention_mask=all_attention_mask,
+        projector_device=projector_device,
         sample_count=sample_count,
         max_new_tokens=max_new_tokens,
         temperature=temperature,
@@ -1153,6 +1163,7 @@ if __name__ == "__main__":
             tokenizer=tokenizer,
             test_data_path=test_data_path,
             save_results_path=results_path,
+            projector_device="cuda" if torch.cuda.is_available() else "cpu",
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
             top_p=args.top_p,

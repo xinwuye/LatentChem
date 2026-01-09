@@ -503,7 +503,7 @@ class Smi_ted(nn.Module):
             
         return results
 
-    def encode(self, smiles_list):
+    def encode(self, smiles_list, embed_batch_size=128):
         """
         处理嵌套列表: [[s1, s2], [s3]] 
         1. Flatten 为 [s1, s2, s3]
@@ -521,7 +521,26 @@ class Smi_ted(nn.Module):
             structure.append(len(item))
 
         # 2. 批量提取 (利用 GPU 并行能力)
-        all_embeddings = self.extract_embeddings(flat_smiles)
+        all_embeddings = []
+        total_smiles = len(flat_smiles)
+        
+        # 使用步长为 embed_batch_size 的循环进行切片
+        for i in tqdm(range(0, total_smiles, embed_batch_size), desc="embedding mol smiles"):
+            # 获取当前批次的 smiles
+            batch_smiles = flat_smiles[i : i + embed_batch_size]
+            
+            # 执行推理 (此时显存占用仅取决于 batch_smiles 的大小)
+            batch_embs = self.extract_embeddings(batch_smiles)
+            
+            # 将结果存入总列表
+            # 注意：这里假设 extract_embeddings 返回的是 list 或可迭代的 Tensor
+            if isinstance(batch_embs, list):
+                all_embeddings.extend(batch_embs)
+            else:
+                # 如果返回的是 Tensor (N, D)，extend 会将其转为 [Tensor(D), Tensor(D)...] 的列表
+                # 这样可以保持和原来逻辑一致，方便后续切片
+                all_embeddings.extend(batch_embs)
+
 
         # 3. 还原嵌套结构
         nested_results = []
