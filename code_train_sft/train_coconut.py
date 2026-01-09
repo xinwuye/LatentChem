@@ -14,7 +14,13 @@ import plotext as plt
 from model_new import Qwen3MoleculeLLM
 from dataloader import load_data, COCONUT_TOKENS
 from config import ModelConfig
-from train_sft_stage2 import MultiModalDataCollator, MultiModalSFTTrainer, LoraTrainingMonitorCallback, TerminalPlotCallback, load_trained_components
+from code_train_sft.train_sft_stage2 import (
+    MultiModalDataCollator,
+    MultiModalSFTTrainer,
+    LoraTrainingMonitorCallback,
+    TerminalPlotCallback,
+    load_trained_components,
+)
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
