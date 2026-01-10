@@ -967,7 +967,7 @@ def run_inference_vllm(
             result_item['results'] = generated_texts
         else:
             generated_text = output_strs[0] if output_strs else ""
-            result_item['results'] = generated_text
+            result_item['result'] = generated_text
         
         results.append(result_item)
 
