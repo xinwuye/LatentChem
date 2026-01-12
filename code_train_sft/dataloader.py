@@ -471,6 +471,120 @@ def load_grpo_data(path):
     return dataset
 
 
+# ============================
+# Part 2. InstructMol Dataset Loading (Molecule-oriented Instructions)
+# ============================
+
+# --------------------------------
+# 1. Extract fields from InstructMol format
+# --------------------------------
+def extract_instructmol_fields(example, is_eval: bool = False):
+    """
+    Extract fields from InstructMol Molecule-oriented_Instructions dataset.
+
+    Format:
+    - instruction: The task instruction
+    - input: SMILES string(s) (may contain multiple molecules separated by '.')
+    - output: The expected answer
+    - metadata: Dict containing task and split info
+
+    Returns:
+    - query: instruction as prompt
+    - input_smiles: list of SMILES strings
+    - label: formatted answer (None if is_eval=True)
+    - task: task name from metadata
+    """
+    instruction = example.get("instruction", "")
+    input_smiles_str = example.get("input", "")
+    output = example.get("output", "")
+    metadata = example.get("metadata", {})
+    task = metadata.get("task", "unknown")
+
+    # Parse SMILES input - split by '.' and remove empty strings
+    input_smiles = []
+    if input_smiles_str:
+        # Split by '.' and filter out empty strings
+        for part in input_smiles_str.split('.'):
+            if part.strip():
+                input_smiles.append(part.strip())
+
+    # Format the query (instruction as prompt)
+    query = instruction.strip()
+
+    # Add answer formatting instruction
+    if not is_eval:
+        query = query.rstrip() + "\nYour final answer must be formatted as <answer> Your Answer </answer>"
+
+    # Label formatting
+    if is_eval:
+        label_value = None
+    else:
+        # Convert output to string and wrap in answer tags
+        label_value = f"<answer> {str(output)} </answer>"
+
+    return {
+        "query": query,
+        "input_smiles": input_smiles,
+        "label": label_value,
+        "cot": None,  # InstructMol doesn't have CoT
+        "cot_steps": None,  # InstructMol doesn't have CoT steps
+        "task": task
+    }
+
+
+# --------------------------------
+# 2. Load InstructMol dataset
+# --------------------------------
+def load_instructmol_data(
+    path,
+    max_len=ModelConfig.MAX_TEXT_LEN,
+    is_coconut=False,
+    scheduled_stage=0,
+    c_thought=2,
+    eval_mode: bool = False,
+):
+    """
+    Load InstructMol Molecule-oriented_Instructions dataset.
+
+    Args:
+        path: Path to the directory containing InstructMol JSON files
+        max_len: Maximum sequence length
+        is_coconut: Whether to use Coconut tokenization (not applicable for InstructMol)
+        scheduled_stage: Coconut stage (not applicable for InstructMol)
+        c_thought: Number of latent tokens per CoT step (not applicable for InstructMol)
+        eval_mode: If True, don't include labels (for inference)
+
+    Returns:
+        HuggingFace Dataset with tokenized inputs
+    """
+    all_json_files = glob.glob(os.path.join(path, "**/*.json"), recursive=True)
+
+    if not all_json_files:
+        raise ValueError(f"No JSON files found in {path}")
+
+    # Load the dataset
+    ds = load_dataset("json", data_files=all_json_files)["train"]
+
+    # Step 1: Extract structured fields
+    dataset = ds.map(
+        extract_instructmol_fields,
+        batched=False,
+        fn_kwargs={"is_eval": eval_mode},
+        remove_columns=ds.column_names
+    )
+
+    # Step 2: Tokenize (use llm_tokenize since InstructMol has no CoT)
+    # Note: InstructMol doesn't have CoT, so we always use include_cot=False
+    dataset = dataset.map(
+        llm_tokenize,
+        batched=False,
+        fn_kwargs={"include_cot": False, "max_len": max_len, "is_eval": eval_mode},
+        remove_columns=["query", "input_smiles", "label", "cot", "cot_steps"]
+    )
+
+    return dataset
+
+
 # --------------------------------
 # 4. 运行示例与测试
 # --------------------------------

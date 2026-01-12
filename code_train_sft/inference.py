@@ -19,7 +19,7 @@ import json
 
 # 导入我们的自定义组件
 from model_stage3 import Qwen3MoleculeLLM
-from dataloader import load_data, COCONUT_TOKENS
+from dataloader import load_data, load_instructmol_data, COCONUT_TOKENS
 from config import ModelConfig
 # from train_sft_stage2 import MultiModalDataCollator, MultiModalSFTTrainer, LoraTrainingMonitorCallback, TerminalPlotCallback
 import torch.nn.functional as F
@@ -49,6 +49,16 @@ def load_test_data(test_data_path, max_len=None):
     if "ChemCoTBench" in test_data_path:
         dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, exclude_tasks=['rcr', 'mechsel'], max_len=max_len)
         logger.info(f"Loaded tokenized eval dataset ChemCoTBench from dir: {len(dataset)} examples")
+        return dataset
+    elif "Molecule-oriented_Instructions" in test_data_path or "instructmol" in test_data_path.lower():
+        dataset = load_instructmol_data(test_data_path, max_len=max_len, eval_mode=True)
+        logger.info(f"Loaded tokenized eval dataset InstructMol from dir: {len(dataset)} examples")
+        return dataset
+    else:
+        # Default to standard ChemCot format
+        logger.warning(f"Unknown dataset path format: {test_data_path}. Attempting to load as ChemCot format...")
+        dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, max_len=max_len)
+        logger.info(f"Loaded tokenized eval dataset from dir: {len(dataset)} examples")
         return dataset
 
 def prepare_evaluation_dataset(
