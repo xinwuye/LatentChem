@@ -1,0 +1,94 @@
+name: biolatenecot_dev
+
+channels:
+  - https://conda.anaconda.org/pytorch
+  - pytorch
+  - conda-forge
+  - defaults
+
+dependencies:
+  - _libgcc_mutex=0.1
+  - _openmp_mutex=5.1
+  - backcall=0.2.0
+  - ca-certificates=2025.11.12
+  - comm=0.2.3
+  - debugpy=1.8.16
+  - entrypoints=0.4
+  - ipykernel=6.29.5
+  - jedi=0.19.2
+  - jupyter_client=7.3.4
+  - jupyter_core=5.7.2
+  # - ld_impl_linux-64=2.38
+  - libffi=3.4.4
+  - libgcc-ng=11.2.0
+  - libgomp=11.2.0
+  - libsodium=1.0.18
+  - libstdcxx-ng=11.2.0
+  - matplotlib-inline=0.1.7
+  - ncurses=6.4
+  - nest-asyncio=1.6.0
+  - openssl=3.0.18
+  - pexpect=4.9.0
+  - pickleshare=0.7.5
+  - pip=24.0
+  - platformdirs=4.2.2
+  - ptyprocess=0.7.0
+  - python=3.9.19
+  - python-dateutil=2.9.0.post0
+  - python_abi=3.9
+  - readline=8.2
+  - setuptools=69.5.1
+  - sqlite=3.45.3
+  - tk=8.6.14
+  - tornado=6.1
+  - traitlets=5.14.3
+  - wheel=0.43.0
+  - xz=5.4.6
+  - zeromq=4.3.5
+  - zlib=1.2.13
+
+  - pip:
+      - absl-py==2.1.0
+      - accelerate==1.10.1
+      - aiohttp==3.9.5
+      - aioprometheus==23.12.0
+      - aiosignal==1.3.1
+      - airportsdata==20250224
+      - albucore==0.0.21
+      - albumentations==1.1.0
+      - annotated-types==0.7.0
+      - anyio==4.4.0
+      - astor==0.8.1
+      - asttokens==3.0.0
+      - async-timeout==4.0.3
+      - attrdict==2.0.1
+      - attrs==23.2.0
+      # - autoawq==0.2.8
+      - av==14.0.0
+      - bitsandbytes==0.48.2
+      - blake3==1.0.4
+      - blinker==1.9.0
+      - cachetools==6.1.0
+      - certifi==2024.7.4
+      - charset-normalizer==3.3.2
+      - click==8.1.7
+      - cloudpickle==3.0.0
+      - cmake==3.30.0
+      - compressed-tensors==0.10.1
+      - configargparse==1.7
+      - contourpy==1.3.0
+      - cupy-cuda12x==13.4.0
+      - cycler==0.12.1
+      - datasets==3.3.2
+      - decorator==5.1.1
+      # - deepseek-vl==1.0.0
+      # - deepseek-vl2==1.0.0
+      - depyf==0.18.0
+      - dill==0.3.8
+      - diskcache==5.6.3
+      - distro==1.9.0
+      - dnspython==2.6.1
+      - einops==0.8.0
+      - email-validator==2.2.0
+      - eval-type-backport==0.2.0
+      - exceptiongroup==1.2.1

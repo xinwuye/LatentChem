@@ -1,0 +1,48 @@
+# 模型权重 (Large Model Weights)
+models/
+*.pt
+*.bin
+*.safetensors
+*.pth
+*.ckpt
+
+# 数据集 (Datasets)
+ChemCotDataset/
+data/
+
+# 训练输出结果 (Training Outputs)
+code_train_sft/qwen3_mol_sft_lora_results*
+code_train_sft/merged_model/
+code_train_sft/logs/
+
+# Python 运行时 (Python Runtime)
+__pycache__/
+*.py[cod]
+*.class
+.env
+.venv
+env/
+build/
+dist/
+*.egg-info/
+
+# 实验监控 (Monitoring)
+wandb/
+
+# 编辑器与系统文件 (IDE & System)
+.cursor/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 其他临时文件
+*.log
+
+# 忽略任何目录下以 output 开头的文件夹
+**/output*/
+
+# SMI-TED model file
+materials/
+**/logs/
+**/results/

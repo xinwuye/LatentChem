@@ -1,0 +1,17 @@
+{
+  "retro": {
+    "error": "No valid prediction-ground_truth pairs to evaluate"
+  },
+  "unknown": {
+    "error": "No valid prediction-ground_truth pairs to evaluate"
+  },
+  "reaction_prediction": {
+    "error": "No valid prediction-ground_truth pairs to evaluate"
+  },
+  "molecule_design": {
+    "error": "No valid prediction-ground_truth pairs to evaluate"
+  },
+  "molecule_captioning": {
+    "error": "No valid prediction-ground_truth pairs to evaluate"
+  }
+}
