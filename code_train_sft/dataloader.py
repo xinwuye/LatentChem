@@ -11,6 +11,7 @@ import glob
 from datasets import load_dataset
 from transformers import AutoTokenizer
 from config import ModelConfig
+import selfies as sf
 
 # --------------------------------
 # Load tokenizer (Qwen decoder-only LM)
@@ -484,29 +485,37 @@ def extract_instructmol_fields(example, is_eval: bool = False):
 
     Format:
     - instruction: The task instruction
-    - input: SMILES string(s) (may contain multiple molecules separated by '.')
-    - output: The expected answer
+    - input: SELFIES string(s) (may contain multiple molecules separated by '.')
+    - output: The expected answer (can be SELFIES or text)
     - metadata: Dict containing task and split info
 
     Returns:
     - query: instruction as prompt
-    - input_smiles: list of SMILES strings
+    - input_smiles: list of standard SMILES strings (decoded from SELFIES)
     - label: formatted answer (None if is_eval=True)
     - task: task name from metadata
     """
     instruction = example.get("instruction", "")
-    input_smiles_str = example.get("input", "")
+    input_selfies_str = example.get("input", "")
     output = example.get("output", "")
     metadata = example.get("metadata", {})
     task = metadata.get("task", "unknown")
 
-    # Parse SMILES input - split by '.' and remove empty strings
+    # Parse SELFIES input and convert to standard SMILES
     input_smiles = []
-    if input_smiles_str:
+    if input_selfies_str:
         # Split by '.' and filter out empty strings
-        for part in input_smiles_str.split('.'):
+        for part in input_selfies_str.split('.'):
             if part.strip():
-                input_smiles.append(part.strip())
+                selfies_str = part.strip()
+                try:
+                    # Convert SELFIES to standard SMILES
+                    standard_smiles = sf.decoder(selfies_str)
+                    input_smiles.append(standard_smiles)
+                except Exception as e:
+                    # If decoding fails, keep the original string and print a warning
+                    print(f"Warning: Failed to decode SELFIES '{selfies_str}': {e}")
+                    input_smiles.append(selfies_str)
 
     # Format the query (instruction as prompt)
     query = instruction.strip()
@@ -563,7 +572,7 @@ def load_instructmol_data(
         raise ValueError(f"No JSON files found in {path}")
 
     # Load the dataset
-    ds = load_dataset("json", data_files=all_json_files)["train"]
+    ds = load_dataset("json", data_files=all_json_files)["test"]
 
     # Step 1: Extract structured fields
     dataset = ds.map(

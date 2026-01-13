@@ -15,7 +15,7 @@ pandas
 requests
 scikit-learn==1.2.2
 seaborn
-tiledbsoma==1.17.1
+tiledbsoma
 pytdc==0.4.17
 yapf
 rapidfuzz
