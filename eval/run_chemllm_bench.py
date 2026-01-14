@@ -35,7 +35,7 @@ def eval_all_ChemLLMBench(log_name, dataset_path, logs_dir, results_dir):
 
 if __name__ == "__main__":
     eval_all_ChemLLMBench(
-        "mytest",
+        "mytest_new",
         "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench/chemllmbench",
         "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench_result",
         "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/results"

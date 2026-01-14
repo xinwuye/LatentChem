@@ -24,7 +24,7 @@ def evaluate_molecule_captioning_score(model_name, gt_path, logs_dir, results_di
         gt = gt_raw[i]['gt']
         gts.append(gt)
         
-        pred = extract_answer(sample['result'])
+        pred = extract_answer(sample['results'])
         preds.append(pred)
         
     res = evaluator.evaluate(preds, gts)

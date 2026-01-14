@@ -39,7 +39,7 @@ def evaluate_retro_score(model_name, gt_path, logs_dir, results_dir):
         pred_list, gt_list = list(), list()
         
         for i, pred in enumerate(pred_results):
-            answer = extract_answer(pred['result'])
+            answer = extract_answer(pred['results'])
             if answer is None:
                 invalid_number += 1
                 continue

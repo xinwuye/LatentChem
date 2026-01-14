@@ -42,10 +42,10 @@ def evaluate_molecule_design_score(model_name, gt_path, logs_dir, results_dir):
         if isinstance(meta, str):
             meta = json.loads(meta)
         gts.append(meta['reference'])
-        print(sample['result'])
+        print(sample['results'])
 
-        pred = extract_answer(sample['result'])
-        # print('pred',pred)
+        pred = extract_answer(sample['results'])
+        print('pred',pred)
         # print('gts',gts)
         # preds.append(pred)
         
