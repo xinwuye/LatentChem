@@ -1,83 +1,39 @@
-# model_stage3.py
-import os
-import math
-import random
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
+import math
 from dataclasses import dataclass
-from typing import Optional, List
-import warnings
-
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PretrainedConfig
 from transformers.modeling_outputs import CausalLMOutputWithPast
+import sys
+import os
+from config import ModelConfig
 
-# local loader: supports smiles or protein encoders
-from loadnew_proteins import load_smi_ted
+# 动态添加路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 
-# -------------------------
-# Small helper layers (kept consistent with your original code)
-# -------------------------
-class LangLayer(nn.Module):
-
-    def __init__(self, n_embd, n_vocab):
-        super().__init__()
-        self.is_cuda_available = torch.cuda.is_available()
-        self.embed = nn.Linear(n_embd, n_embd)
-        self.ln_f = nn.LayerNorm(n_embd)
-        self.head = nn.Linear(n_embd, n_vocab, bias=False)
-    
-    def forward(self, tensor):
-        if self.is_cuda_available:
-            self.embed.cuda()
-            self.ln_f.cuda()
-            self.head.cuda()
-            tensor = tensor.cuda()
-        tensor = self.embed(tensor)
-        tensor = F.gelu(tensor)
-        tensor = self.ln_f(tensor)
-        tensor = self.head(tensor)
-        return tensor
-    
-
-class Net(nn.Module):
-    
-    def __init__(self, smiles_embed_dim, n_output=1, dropout=0.2):
-        super().__init__()
-        self.desc_skip_connection = True
-        self.fc1 = nn.Linear(smiles_embed_dim, smiles_embed_dim)
-        self.dropout1 = nn.Dropout(dropout)
-        self.relu1 = nn.GELU()
-        self.fc2 = nn.Linear(smiles_embed_dim, smiles_embed_dim)
-        self.dropout2 = nn.Dropout(dropout)
-        self.relu2 = nn.GELU()
-        self.final = nn.Linear(smiles_embed_dim, n_output)
-
-    def forward(self, smiles_emb, multitask=False):
-        x_out = self.fc1(smiles_emb)
-        x_out = self.dropout1(x_out)
-        x_out = self.relu1(x_out)
-
-        if self.desc_skip_connection is True:
-            x_out = x_out + smiles_emb
-
-        z = self.fc2(x_out)
-        z = self.dropout2(z)
-        z = self.relu2(z)
-        if self.desc_skip_connection is True:
-            z = self.final(z + x_out)
-        else:
-            z = self.final(z)
-
-        if multitask:
-            return torch.sigmoid(z)
-        return z
+from smi_ted_light.loadnew import load_smi_ted
+# from loadnew import load_smi_ted
+from load_protein_embeddings import load_protein_h5_encoder
+import torch.nn.functional as F
+from transformers.generation.utils import GenerationConfig
+from typing import Optional, List
 
 
-# -------------------------
-# Projector / Bio components (unchanged)
-# -------------------------
+@dataclass
+class BioLatentCausalLMOutputWithPast(CausalLMOutputWithPast):
+    ce_loss: Optional[torch.Tensor] = None
+    bio_latent_loss: Optional[torch.Tensor] = None
+    bio_latent_loss_scaled: Optional[torch.Tensor] = None
+    bio_latent_active: Optional[bool] = None
+    task_latent_loss: Optional[torch.Tensor] = None
+    task_latent_loss_scaled: Optional[torch.Tensor] = None
+    task_latent_active: Optional[bool] = None
+
+
+# ============================
+# 1. 投影器：将分子特征映射到LLM空间
+# ============================
 class QueryAttentionProjector(nn.Module):
     def __init__(self, 
                  input_dim, 
@@ -153,6 +109,9 @@ class QueryAttentionProjector(nn.Module):
         return out
 
 
+# ============================
+# 1b. Stage 3 Memory Updater: 更新 BIO Token 的隐藏状态
+# ============================
 class BioTokenUpdater(nn.Module):
     def __init__(self, d_llm, nhead=8):
         super().__init__()
@@ -180,6 +139,9 @@ class BioTokenUpdater(nn.Module):
         return bio_embeds
 
 
+# ============================
+# 1c. Bio Thinker: one-pass self-attn block for bio-latent tokens
+# ============================
 class SinusoidalPositionalEncoding(nn.Module):
     def __init__(self, d_model: int, base: float = 10000.0):
         super().__init__()
@@ -230,24 +192,13 @@ class TaskThinker(nn.Module):
         return x + y
 
 
-# -------------------------
-# Model wrapper + outputs
-# -------------------------
-@dataclass
-class BioLatentCausalLMOutputWithPast(CausalLMOutputWithPast):
-    ce_loss: Optional[torch.Tensor] = None
-    bio_latent_loss: Optional[torch.Tensor] = None
-    bio_latent_loss_scaled: Optional[torch.Tensor] = None
-    bio_latent_active: Optional[bool] = None
-    task_latent_loss: Optional[torch.Tensor] = None
-    task_latent_loss_scaled: Optional[torch.Tensor] = None
-    task_latent_active: Optional[bool] = None
-
-
+# ============================
+# 2. 多模态融合模型 (兼容trl的SFTTrainer)
+# ============================
 class Qwen3MoleculeLLM(PreTrainedModel):
     def __init__(self, 
                  qwen_model_name,
-                 mol_config,       # must be a dict
+                 mol_config,       # 🚨 必须传入配置字典
                  device_map=None,
                  is_coconut: bool = False,
                  is_both_latent: bool = False,
@@ -263,23 +214,22 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         """
         分子-文本多模态大语言模型
         
-        qwen_model_name: path/name for the base causal LM
-        mol_config: dict containing: input_dim, num_queries, num_heads, encoder_type (protein|smiles), smi_ted_folder, smi_ted_ckpt
+        参数:
+            qwen_model_name: Qwen基础模型路径
+            mol_config: 包含 input_dim, num_queries, num_heads 等参数的字典
+            device_map: 设备映射配置
         """
-        # Load base config & initialize PreTrainedModel
+        # 加载Qwen模型的配置文件
         config = PretrainedConfig.from_pretrained(qwen_model_name)
         super().__init__(config)
 
-        # parse mol_config
-        self.encoder_type = mol_config.get("encoder_type", "smiles").lower()
-        self.num_queries = int(mol_config.get('num_queries', 128))
-        self.mol_input_dim = int(mol_config.get('input_dim', 768))
-        self.mol_num_heads = int(mol_config.get('num_heads', 8))
-        self.smi_ted_folder = mol_config.get('smi_ted_folder', None)
-        self.smi_ted_ckpt = mol_config.get('smi_ted_ckpt', None)
-        self.smi_ted_vocab = mol_config.get('smi_ted_vocab', None)
-
-        # stage flags/params
+        # 从 mol_config 解析参数
+        self.num_queries = mol_config.get('num_queries', 128)
+        self.mol_input_dim = mol_config.get('input_dim', 768)
+        self.mol_num_heads = mol_config.get('num_heads', 8)
+        self.smi_ted_folder = mol_config.get('smi_ted_folder', ModelConfig.DEFAULT_SMI_TED_FOLDER)
+        self.smi_ted_ckpt = mol_config.get('smi_ted_ckpt', ModelConfig.DEFAULT_SMI_TED_CKPT)
+        self.protein_embedding_folder = mol_config.get(ModelConfig.DEFAULT_PROTEIN_EMBEDDINGS_PATH)
         self.is_coconut = bool(is_coconut)
         self.is_both_latent = bool(is_both_latent)
         self.bio_latent_lambda = float(bio_latent_lambda)
@@ -291,11 +241,11 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         self.max_cot_string_len = int(max_cot_string_len)
         self.task_latent_max_steps = int(task_latent_max_steps)
 
-        # ---- 1. Load text tokenizer + model
+        # ---- 1. 加载预训练的Qwen LLM ----
         self.tokenizer = AutoTokenizer.from_pretrained(qwen_model_name)
         self.config._name_or_path = qwen_model_name
 
-        # add multimodal tokens
+        # 添加分子特殊标记
         self.extra_tokens = [
             "<mol_start>",
             "<mol_end>",
@@ -308,17 +258,22 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         ]
         self.tokenizer.add_tokens(self.extra_tokens)
 
+        # 加载基础语言模型
         self.model = AutoModelForCausalLM.from_pretrained(
             qwen_model_name,
+            # IMPORTANT: fp32 doubles memory and will OOM easily for 8B models under GRPO.
+            # Default to bf16 (good on Ampere/Hopper). Callers can override via `torch_dtype=...`.
             torch_dtype=torch_dtype,
             device_map=device_map
         )
-
-        # ensure embedding resize compatibility
+        
+        # 调整词表大小以包含新添加的特殊标记
+        # 注意：我们使用 max() 确保词表大小不小于原始 config 中的 vocab_size，
+        # 这样可以保持与 vLLM (加载原始 config.json) 的兼容性，避免权重加载时的 AssertionError。
         new_vocab_size = max(len(self.tokenizer), self.model.config.vocab_size)
         self.model.resize_token_embeddings(new_vocab_size)
-
-        # special token ids
+        
+        # 获取特殊标记的ID
         self.start_id = self.tokenizer.convert_tokens_to_ids("<mol_start>")
         self.end_id = self.tokenizer.convert_tokens_to_ids("<mol_end>")
         self.latent_id = self.tokenizer.convert_tokens_to_ids("<latent>")
@@ -328,62 +283,53 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         self.start_bio_latent_id = self.tokenizer.convert_tokens_to_ids("<start_bio_latent>")
         self.end_bio_latent_id = self.tokenizer.convert_tokens_to_ids("<end_bio_latent>")
 
-        # llm embedding dim
+        # 获取LLM的嵌入维度
         self.d_llm = self.model.get_input_embeddings().weight.shape[1]
 
-        # ---- 2. load molecule/protein encoder via unified loader
-        encoder_type = self.encoder_type
-        if encoder_type == "protein":
-            protein_out_dim = int(mol_config.get("input_dim", 768))
-            protein_max_len = int(mol_config.get("max_len", 2048))
-            enc = load_smi_ted(
-                folder=self.smi_ted_folder or "./smi_ted_light",
-                ckpt_filename=self.smi_ted_ckpt or "smi-ted-Light_40.pt",
-                vocab_filename=self.smi_ted_vocab or "bert_vocab_curated.txt",
-                encoder_type="protein",
-                protein_output_dim=protein_out_dim,
-                protein_max_len=protein_max_len,
-                freeze_protein=True,
-            )
-            self.mol_encoder = enc
-            if hasattr(enc, "output_dim"):
-                self.mol_input_dim = int(enc.output_dim)
-        else:
-            enc = load_smi_ted(
-                folder=self.smi_ted_folder or "./smi_ted_light",
-                ckpt_filename=self.smi_ted_ckpt or "smi-ted-Light_40.pt",
-                vocab_filename=self.smi_ted_vocab or "bert_vocab_curated.txt",
-                encoder_type="smiles",
-            )
-            self.mol_encoder = enc
-            if hasattr(enc, "output_dim"):
-                self.mol_input_dim = int(enc.output_dim)
+        # ---- 2. 分子编码器和投影器 ----
+        # 加载预训练的分子编码器（SMI-TED）
+        self.mol_encoder = load_smi_ted(
+            folder=self.smi_ted_folder,
+            ckpt_filename=self.smi_ted_ckpt
+        )
 
-        # warn if config mismatch
-        if int(mol_config.get("input_dim", self.mol_input_dim)) != self.mol_input_dim:
-            warnings.warn(
-                f"mol_config['input_dim'] differs from encoder output dim ({mol_config.get('input_dim')} vs {self.mol_input_dim}); using encoder dim."
-            )
-
-        # projector
+        # load separate protein encoder (uses existing .h5 files)
+        self.protein_encoder = load_protein_h5_encoder(
+            folder=self.protein_embedding_folder,   # or "embeddings_proteins" if different
+            device=self.model.device,     # place tensors on same device as LLM
+            pool="none"                   # keep per-residue (L, D) so projector handles variable length
+        )
+        
+        # 冻结分子编码器参数
+        for param in self.mol_encoder.parameters():
+            param.requires_grad = False
+        self.mol_encoder.eval()
+        
+        # 初始化投影器，使用动态解析的参数
         self.projector = QueryAttentionProjector(
             input_dim=self.mol_input_dim,
             num_queries=self.num_queries,
             output_dim=self.d_llm,
             num_heads=self.mol_num_heads
         )
+        # 确保投影器类型与基础模型一致
         self.projector.to(self.model.dtype)
 
-        # stage3 components
+        # ---- Stage 3: Bio Token Updater ----
         self.bio_updater = BioTokenUpdater(d_llm=self.d_llm, nhead=self.mol_num_heads)
         self.bio_updater.to(self.model.dtype)
-        self.bio_thinker = BioThinker(d_model=self.d_llm, nhead=self.mol_num_heads, dropout=self.bio_thinker_dropout)
+
+        # ---- Stage 3: Bio Thinker (optional) ----
+        self.bio_thinker = BioThinker(
+            d_model=self.d_llm,
+            nhead=self.mol_num_heads,
+            dropout=self.bio_thinker_dropout,
+        )
         self.bio_thinker.to(self.model.dtype)
+
+        # ---- Stage 3: Task Thinker (optional) ----
         self.task_thinker = TaskThinker(d_model=self.d_llm, dropout=self.task_thinker_dropout)
         self.task_thinker.to(self.model.dtype)
-
-        # classifier head (if needed)
-        self.net = Net(self.d_llm, n_output=1)
 
     # ---- Liger Kernel & Compatibility Helpers ----
     def _get_actual_llm(self):
@@ -412,6 +358,10 @@ class Qwen3MoleculeLLM(PreTrainedModel):
     def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs=None, **kwargs):
         """
         开启梯度检查点，转发给内部的语言模型。
+
+        兼容 TRL/Transformers 的两种调用方式：
+        - `gradient_checkpointing_enable(gradient_checkpointing_kwargs=dict(...))`
+        - `gradient_checkpointing_enable(dict(...))`（将 dict 作为位置参数传入）
         """
         if not hasattr(self.model, "gradient_checkpointing_enable"):
             return
@@ -421,11 +371,14 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         elif gradient_checkpointing_kwargs is None:
             merged = dict(kwargs)
         else:
+            # Unexpected positional argument type; ignore it.
             merged = dict(kwargs)
 
         try:
+            # transformers 常见签名：gradient_checkpointing_enable(gradient_checkpointing_kwargs=...)
             self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs=merged)
         except TypeError:
+            # 兼容少数实现：gradient_checkpointing_enable(**kwargs)
             self.model.gradient_checkpointing_enable(**merged)
             
     def gradient_checkpointing_disable(self):
@@ -457,6 +410,9 @@ class Qwen3MoleculeLLM(PreTrainedModel):
 
         llm = self._get_actual_llm()
         backbone = llm.model
+        # has_lora_in_backbone = any(hasattr(m, "lora_A") and hasattr(m, "lora_B") for m in backbone.modules())
+        # if not has_lora_in_backbone:
+        #     raise RuntimeError("Expected LoRA layers in `llm.model` (backbone), but none was detected.")
 
         curr_embeds = initial_embeds
         for pass_idx in range(max_n_latents):
@@ -552,9 +508,18 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         # =========================================================
         # 1. 分子特征拉平与批量投影 (优化性能)
         # =========================================================
+        # with torch.no_grad():
+        #     # mol_emb_nested: [[Tensor(L1, 768), Tensor(L2, 768)], [Tensor(L3, 768)]]
+        #     mol_emb_nested = self.mol_encoder.encode(smiles_list)
         with torch.no_grad():
-            # mol_emb_nested: [[Tensor(L1, 768), Tensor(L2, 768)], [Tensor(L3, 768)]]
-            mol_emb_nested = self.mol_encoder.encode(smiles_list)
+            # If caller provided protein keys, use protein encoder (list-of-list of keys)
+            protein_keys = kwargs.pop("protein_keys", None)
+            if protein_keys is not None:
+                # expected shape: List[List[str]] (samples -> per-protein keys like "ex42" or "protein_function/ex42")
+                mol_emb_nested = self.protein_encoder.encode(protein_keys)
+            else:
+                # original SMILES behavior (unchanged)
+                mol_emb_nested = self.mol_encoder.encode(smiles_list)
 
         flat_mols = []
         mol_counts = []
@@ -847,6 +812,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
             inputs_embeds=model_input_embeds,
             attention_mask=final_attn_mask,
             labels=final_labels,
+            use_cache=False,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=True,
@@ -857,6 +823,24 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         # Loss = avg_i max(0, alpha - cos(v_i, mu_i)), where v_i is detached.
         # =========================================================
         ce_loss = outputs.loss
+        if ce_loss is None:
+            # GRPO log-prob computation (and some inference paths) call `forward()` without labels.
+            # In that case HF returns `loss=None`; skip all auxiliary loss bookkeeping and only return logits.
+            return BioLatentCausalLMOutputWithPast(
+                loss=None,
+                logits=outputs.logits,
+                past_key_values=outputs.past_key_values,
+                hidden_states=outputs.hidden_states,
+                attentions=outputs.attentions,
+                ce_loss=None,
+                bio_latent_loss=None,
+                bio_latent_loss_scaled=None,
+                bio_latent_active=False,
+                task_latent_loss=None,
+                task_latent_loss_scaled=None,
+                task_latent_active=False,
+            )
+
         total_loss = ce_loss
 
         bio_latent_loss = ce_loss.new_tensor(0.0)
@@ -951,6 +935,8 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         It returns:
         - `prompt_embeds`: (B, L, d_llm) fused embeddings (left-padded)
         - `prompt_attn_mask`: (B, L) attention mask aligned to `prompt_embeds`
+
+        This is used by vLLM generation paths that accept `prompt_embeds`.
         """
         device = input_ids.device
         B = input_ids.size(0)
@@ -971,11 +957,20 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         self._last_task_latent_counts = [0 for _ in range(B)]
         refine_bio_tokens = True
 
+        # NOTE: This function is used both for generation (call under `torch.no_grad()` / `torch.inference_mode()`)
+        # and for GRPO log-prob computation (needs gradients for projector/bio_updater/bio_thinker/task_thinker).
+
         # =========================================================
         # 1. Molecule features: flatten + batch projection
         # =========================================================
+        # with torch.no_grad():
+        #     mol_emb_nested = self.mol_encoder.encode(smiles_list)
         with torch.no_grad():
-            mol_emb_nested = self.mol_encoder.encode(smiles_list)
+            protein_keys = kwargs.pop("protein_keys", None)
+            if protein_keys is not None:
+                mol_emb_nested = self.protein_encoder.encode(protein_keys)
+            else:
+                mol_emb_nested = self.mol_encoder.encode(smiles_list)
 
         flat_mols = []
         mol_counts = []
@@ -1130,10 +1125,16 @@ class Qwen3MoleculeLLM(PreTrainedModel):
 
         # =========================================================
         # 5. Task latent generation (only when is_both_latent)
+        # Each step: decode next token; if <end_latent> then append and stop,
+        # otherwise append a new latent embedding (from hidden state) refined by TaskThinker.
         # =========================================================
+        # NOTE: Coconut mode already uses <start_latent>/<latent>/<end_latent> in `input_ids`; avoid duplicating.
         if use_bio_thinker and (not use_coconut):
             llm = self._get_actual_llm()
             backbone = llm.model
+            # has_lora_in_backbone = any(hasattr(m, "lora_A") and hasattr(m, "lora_B") for m in backbone.modules())
+            # if not has_lora_in_backbone:
+            #     raise RuntimeError("Expected LoRA layers in `llm.model` (backbone), but none was detected.")
             lm_head = llm.lm_head
 
             new_samples = []
@@ -1155,6 +1156,8 @@ class Qwen3MoleculeLLM(PreTrainedModel):
                 for _ in range(int(self.task_latent_max_steps)):
                     full_seq = torch.cat([base_prefix, latent_block], dim=1)
                     full_mask = torch.ones(1, full_seq.size(1), device=device, dtype=torch.long)
+                    # Task-latent token *sampling* does not need gradients; gradients are provided by the later GRPO
+                    # log-prob forward on the full (prompt + completion) sequence.
                     with torch.no_grad():
                         out = backbone(
                             inputs_embeds=full_seq,
@@ -1267,15 +1270,14 @@ class Qwen3MoleculeLLM(PreTrainedModel):
 
 
 if __name__ == "__main__":
-    # quick sanity init
+    # Test Initialization
     mol_config = {
         'num_queries': 8,
         'input_dim': 768,
-        'num_heads': 2,
-        'encoder_type': 'protein'
+        'num_heads': 2
     }
     model = Qwen3MoleculeLLM(
-        qwen_model_name="gpt2",
-        mol_config=mol_config,
-    )
-    print("Model initialized OK")
+        qwen_model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B",
+        mol_config=mol_config
+    ).cuda()
+    print("Stage 3 Model Initialized Successfully!")
