@@ -1,8 +1,15 @@
-from ChemLLMBench.core.metrics import exact_match
-from core.utils import extract_answer
+import sys
 import logging
 import json
 import os
+
+# Import from local core directory
+local_core_dir = os.path.join(os.path.dirname(__file__), 'core')
+if local_core_dir not in sys.path:
+    sys.path.insert(0, local_core_dir)
+
+from metrics import exact_match
+from core.utils import extract_answer
 
 logger = logging.getLogger(__name__)
 
@@ -30,20 +37,23 @@ def evaluate_name_prediction_score(model_name, gt_path, logs_dir, results_dir):
         file_name = f"{logs_dir}/{task}/{model_name}.json" 
         pred_results = json.load(open(file_name, "r"))
         
-        gt_name = f"{gt_path}/{task}.json"
+        gt_name = f"{gt_path}/{task}/{task}.json"
         gts = json.load(open(gt_name, "r"))
         
         invalid_number = 0
         pred_list, gt_list = list(), list()
         
         for i, pred in enumerate(pred_results):
-            answer = extract_answer(pred['result'])
+            answer = extract_answer(pred['results'])
             if answer is None:
                 invalid_number += 1
                 continue
             pred_list.append(answer)
             gt = gts[i]
-            meta = json.loads(gt['meta'])
+            meta = gt['meta']
+            # Check if meta is already a dict or a JSON string
+            if isinstance(meta, str):
+                meta = json.loads(meta)
             gt_list.append(meta['reference'])
         
         assert len(gt_list) == len(pred_list)

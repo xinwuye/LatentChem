@@ -19,10 +19,10 @@ class ModelConfig:
     CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
     
     # Qwen 模型路径
-    DEFAULT_QWEN_PATH = os.path.abspath(os.path.join(CURRENT_DIR, "../models/Qwen3-8B-Base"))
+    DEFAULT_QWEN_PATH = os.path.abspath(os.path.join(CURRENT_DIR, "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/Qwen3-8B-Base"))
     
     # SMI-TED 模型文件夹和权重文件名
-    DEFAULT_SMI_TED_FOLDER = os.path.abspath(os.path.join(CURRENT_DIR, "../models/smi-ted"))
+    DEFAULT_SMI_TED_FOLDER = os.path.abspath(os.path.join(CURRENT_DIR, "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/smi-ted"))
     DEFAULT_SMI_TED_CKPT = "smi-ted-Light_40.pt"
     
     # 数据集路径

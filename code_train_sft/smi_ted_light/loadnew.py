@@ -519,6 +519,8 @@ class Smi_ted(nn.Module):
         for item in smiles_list:
             flat_smiles.extend(item)
             structure.append(len(item))
+        if not flat_smiles:
+            return smiles_list
 
         # 2. 批量提取 (利用 GPU 并行能力)
         all_embeddings = self.extract_embeddings(flat_smiles)

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict
 from functools import partial
-
+from rdkit.Chem import rdFingerprintGenerator
 from Levenshtein import distance as lev
 import numpy as np
 import nltk
@@ -16,18 +16,35 @@ from sklearn.metrics import accuracy_score, f1_score, mean_squared_error, mean_a
 
 RDLogger.DisableLog('rdApp.*')
 # nltk.download('wordnet')
-nltk.download('punkt_tab')
+
 
 def exact_match(ot_smi, gt_smi):
-    m_out = Chem.MolFromSmiles(ot_smi)
-    m_gt = Chem.MolFromSmiles(gt_smi)
+    params = Chem.SmilesParserParams()
+    params.sanitize = True
+    params.removeHs = True
+    # Chem.MolToSmiles(mol, canonical=True, isomericSmiles=False)
+    m_out = Chem.MolFromSmiles(ot_smi, params=params)
+    m_gt = Chem.MolFromSmiles(gt_smi, params=params)
+    if m_out is None or m_gt is None:
+        sim = 0.0
+    else:
+        fpgen = rdFingerprintGenerator.GetMorganGenerator(
+            radius=2,     # ECFP4
+            fpSize=2048
+        )
+        fp_out = fpgen.GetFingerprint(m_out)
+        fp_gt  = fpgen.GetFingerprint(m_gt)
 
-    try:
-        if Chem.MolToInchi(m_out) == Chem.MolToInchi(m_gt):
-            return 1
-    except:
-        pass
-    return 0
+        sim = DataStructs.TanimotoSimilarity(fp_out, fp_gt)
+        
+    return sim
+
+    # try:
+    #     if Chem.MolToInchi(m_out) == Chem.MolToInchi(m_gt):
+    #         return 1
+    # except:
+    #     pass
+    # return 0
 
 
 def maccs_similarity(ot_m, gt_m):
@@ -326,27 +343,39 @@ class MoleculeCaptionEvaluator(Evaluator):
         for pred, gt in zip(predictions, references):
             pred, gt = self.build_evaluate_tuple(pred, gt)
 
+            # Handle None values for prediction and ground truth
+            if pred is None:
+                pred = ""
+            if gt is None:
+                gt = ""
+
             for metric in metrics:
                 if metric in ["bleu-2", "bleu-4"]:
-                    results[metric].append(self._metric_functions[metric]([gt], pred))
+                    # Tokenize the ground truth and prediction to avoid None issues
+                    gt_tokens = [word_tokenize(gt)] if gt else [[]]
+                    pred_tokens = word_tokenize(pred) if pred else []
+                    try:
+                        results[metric].append(self._metric_functions[metric](gt_tokens, pred_tokens))
+                    except:
+                        # If there's an error computing BLEU (e.g., empty sequences), append 0
+                        results[metric].append(0)
                 elif metric == "meteor":
-                    results[metric].append(self._metric_functions[metric]([word_tokenize(gt)], word_tokenize(pred)))
+                    gt_tokens = [word_tokenize(gt)] if gt else [[]]
+                    pred_tokens = word_tokenize(pred) if pred else []
+                    try:
+                        results[metric].append(self._metric_functions[metric](gt_tokens, pred_tokens))
+                    except:
+                        # If there's an error computing METEOR, append 0
+                        results[metric].append(0)
                 elif metric.startswith("rouge"):
-                    scores = self.rouge_scorer.score(gt, pred)
-                    rouge_variant = metric.split("-")[-1]
-                    score = scores['rouge' + rouge_variant].fmeasure
-                    results[metric].append(score)
-                else:
-                    raise ValueError(f"Unsupported metric: {metric}")
-                if metric in ["bleu-2", "bleu-4"]:
-                    results[metric].append(self._metric_functions[metric]([gt], pred))
-                elif metric == "meteor":
-                    results[metric].append(self._metric_functions[metric]([word_tokenize(gt)], word_tokenize(pred)))
-                elif metric.startswith("rouge"):
-                    scores = self.rouge_scorer.score(gt, pred)
-                    rouge_variant = metric.split("-")[-1]
-                    score = scores['rouge' + rouge_variant].fmeasure
-                    results[metric].append(score)
+                    try:
+                        scores = self.rouge_scorer.score(gt or "", pred or "")
+                        rouge_variant = metric.split("-")[-1]
+                        score = scores['rouge' + rouge_variant].fmeasure
+                        results[metric].append(score)
+                    except:
+                        # If there's an error computing ROUGE, append 0
+                        results[metric].append(0)
                 else:
                     raise ValueError(f"Unsupported metric: {metric}")
 

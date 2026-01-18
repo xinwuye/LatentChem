@@ -65,7 +65,7 @@ def preprocess_single_subtask(csv_path, output_path, task_name):
         raw_prompt = row['task']
         candidate_rank = row['candidate_rank']
         smiles_list = ast.literal_eval(candidate_rank)
-        random.shuffle(smiles_list)
+        # random.shuffle(smiles_list)
         
         prompt, input_smiles = prepare_prompt(task_name, raw_prompt, smiles_list)
         preprocessed.append({

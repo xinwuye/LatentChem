@@ -25,7 +25,7 @@ def evaluate_retro_score(model_name, gt_path, logs_dir, results_dir):
         file_name = f"{logs_dir}/{task}/{model_name}.json" 
         pred_results = json.load(open(file_name, "r"))
         
-        gt_name = f"{gt_path}/{task}.json"
+        gt_name = f"{gt_path}/{task}/{task}.json"
         gts = json.load(open(gt_name, "r"))
         
         invalid_number = 0
@@ -38,7 +38,7 @@ def evaluate_retro_score(model_name, gt_path, logs_dir, results_dir):
                 continue
             pred_list.append(answer)
             gt = gts[i]
-            meta = json.loads(gt['meta'])
+            meta = gt['meta']
             gt_list.append(meta['reference'])
         
         assert len(gt_list) == len(pred_list)

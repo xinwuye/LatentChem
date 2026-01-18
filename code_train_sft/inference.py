@@ -19,7 +19,7 @@ import json
 
 # 导入我们的自定义组件
 from model_stage3 import Qwen3MoleculeLLM
-from dataloader import load_data, COCONUT_TOKENS
+from dataloader import load_data
 from config import ModelConfig
 # from train_sft_stage2 import MultiModalDataCollator, MultiModalSFTTrainer, LoraTrainingMonitorCallback, TerminalPlotCallback
 import torch.nn.functional as F
@@ -51,6 +51,9 @@ def load_test_data(test_data_path, include_tasks, max_len=None):
         logger.info(f"Loaded tokenized eval dataset ChemCoTBench from dir: {len(dataset)} examples")
     elif "ChemCoTDataset" in test_data_path:
         dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=['rcr'], max_len=max_len)
+        logger.info(f"Loaded tokenized eval dataset ChemCoTBench from dir: {len(dataset)} examples")
+    else:
+        dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, max_len=max_len)#exclude_tasks=['molecule_design'],
         logger.info(f"Loaded tokenized eval dataset ChemCoTBench from dir: {len(dataset)} examples")
     
     return dataset
@@ -319,7 +322,11 @@ def inference_stage3():
                         help="并行进程总数（样本分片数）")
     parser.add_argument("--gpu", type=int, default=None,
                         help="显卡 id，优先于 proc_index (如果提供则使用此 GPU)")
-    
+
+    # 添加张量并行支持
+    parser.add_argument("--tensor_parallel_size", type=int, default=1,
+                        help="张量并行大小（使用的GPU数量），当大于1时启用张量并行")
+
     args = parser.parse_args()
     
     # 1. 基础配置

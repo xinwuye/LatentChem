@@ -18,7 +18,7 @@ import plotext as plt
 
 # 导入我们的自定义组件
 from model_stage3 import Qwen3MoleculeLLM
-from dataloader import load_data, COCONUT_TOKENS
+from dataloader import load_data
 from config import ModelConfig
 # from train_sft_stage2 import MultiModalDataCollator, MultiModalSFTTrainer, LoraTrainingMonitorCallback, TerminalPlotCallback
 import torch.nn.functional as F

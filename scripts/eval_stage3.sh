@@ -3,38 +3,39 @@ set -euo pipefail
 # =========================
 # exp
 # =========================
-EXP_NAME=<exp_name>
-CKPT_DIR_NAME=<ckpt_name>
-DATASET_NAME=ChemCoTBench
+EXP_NAME=exp_chemllmbench_stage3_1_5_no
+CKPT_DIR_NAME=chemllmbench_stage3_1_5_no
+DATASET_NAME=ChemLLMBench/chemllmbench
 INCLUDE_TASKS=""
-CUDA_DEVICES=0,1
+CUDA_DEVICES=0,1,2,3,4
 
 # =========================
 # inference config
 # =========================
-BATCH_SIZE=4
+BATCH_SIZE=8
 NUM_RETURN_SEQUENCES=1
 MAX_NEW_TOKENS=2048
-TEMPERATURE=0.7
+TEMPERATURE=1.5
 TOP_P=0.9
 MAX_SEQ_LENGTH=8192
 
 # Stage-3 specific
 TRAINING_STAGE=3
 C_THOUGHT=2
-IS_BOTH_LATENT=true
+IS_BOTH_LATENT=false
 BIO_LATENT_LAMBDA=0.0
 BIO_LATENT_ALPHA=0.5
 MAX_COT_STRING_LEN=2048
 TASK_LATENT_MAX_STEPS=10
 MAX_TEST_SAMPLES=""
+TENSOR_PARALLEL_SIZE=5
 
 # =========================
 # path
 # =========================
 SCRIPT_PATH="code_train_sft/inference.py"
 OUTPUT_DIR="outputs/${EXP_NAME}"
-CKPT_DIR="outputs/${CKPT_DIR_NAME}"
+CKPT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/final_model/stage4-lr2e-4-cf_margin01-freeze_llm-freeze_projector-1247-lr1e-5-temp15-nonlatent/stage4"
 LORA_PATH="${CKPT_DIR}/lora_weights"
 PROJECTOR_PATH="${CKPT_DIR}/mm_projector.pt"
 DATA_PATH="data/${DATASET_NAME}"
@@ -135,6 +136,7 @@ for idx in "${!GPU_ARRAY[@]}"; do
     --proc_index "${PROC_INDEX}"
     --num_procs "${NUM_PROCS}"
     --gpu "${GPU_ID}"
+    --tensor_parallel_size "${TENSOR_PARALLEL_SIZE}"
   )
 
   if [[ -n "${MAX_TEST_SAMPLES}" ]]; then
@@ -178,7 +180,7 @@ cd eval || {
 }
 
 EVAL_CMD=(
-  "${PYTHON_BIN}" "eval_results.py"
+  "${PYTHON_BIN}" "results_merge.py"
   --result_path "../${INFERENCE_RESULTS_PATH}"
   --log_name "${LOG_NAME}"
   --dataset_paths "../${DATA_PATH}"
@@ -202,4 +204,4 @@ echo "All done."
 echo "Inference results: ${INFERENCE_RESULTS_PATH}"
 echo "Eval log name: ${LOG_NAME}"
 echo "Full log: ${LOG_FILE}"
-echo "====================================================="
+echo "====================================================="d

@@ -42,9 +42,13 @@ class BaseTaskEvaluator(ABC):
             return json.load(f)
 
     def _load_gt_raw(self, gt_path: str, taskname: str) -> List[Any]:
+        # First try the original path format
         path = os.path.join(gt_path, taskname + '.json')
         if not os.path.exists(path):
-            raise ValueError(f"gt file not found: {path}")
+            # If not found, try the subdirectory format: gt_path/taskname/taskname.json
+            path = os.path.join(gt_path, taskname, taskname + '.json')
+            if not os.path.exists(path):
+                raise ValueError(f"gt file not found: {path}")
         with open(path, 'r') as f:
             return json.load(f)
 

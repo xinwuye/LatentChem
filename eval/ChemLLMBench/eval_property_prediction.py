@@ -1,7 +1,15 @@
-from core.utils import extract_answer
+import sys
 import logging
 import json
 import os
+
+# Add the parent directory to the path to access the main core module
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)  # Changed from dirname(dirname(current_dir)) to dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from core.utils import extract_answer
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +34,20 @@ def evaluate_property_prediction_score(model_name, gt_path, logs_dir, results_di
         file_name = f"{logs_dir}/{task}/{model_name}.json" 
         pred_results = json.load(open(file_name, "r"))
         
-        gt_name = f"{gt_path}/{task}.json"
+        gt_name = f"{gt_path}/{task}/{task}.json"
         gts = json.load(open(gt_name, "r"))
         
         invalid_number = 0
         pred_list, gt_list = list(), list()
         
         for i, pred in enumerate(pred_results):
-            answer = extract_answer(pred['result'])
+            # Handle both 'result' and 'results' keys depending on the data format
+            if 'results' in pred:
+                answer = extract_answer(pred['results'])
+            elif 'result' in pred:
+                answer = extract_answer(pred['result'])
+            else:
+                raise KeyError("Prediction must contain either 'result' or 'results' key")
             if answer is None:
                 invalid_number += 1
                 continue
