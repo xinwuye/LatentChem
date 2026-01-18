@@ -12,7 +12,7 @@ from config import ModelConfig
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 
-from smi_ted_light.loadnew import load_smi_ted
+# from smi_ted_light.loadnew import load_smi_ted
 # from loadnew import load_smi_ted
 from load_protein_embeddings import load_protein_h5_encoder
 import torch.nn.functional as F
@@ -229,7 +229,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         self.mol_num_heads = mol_config.get('num_heads', 8)
         self.smi_ted_folder = mol_config.get('smi_ted_folder', ModelConfig.DEFAULT_SMI_TED_FOLDER)
         self.smi_ted_ckpt = mol_config.get('smi_ted_ckpt', ModelConfig.DEFAULT_SMI_TED_CKPT)
-        self.protein_embedding_folder = mol_config.get(ModelConfig.DEFAULT_PROTEIN_EMBEDDINGS_PATH)
+        self.protein_embedding_folder = ModelConfig.DEFAULT_PROTEIN_EMBEDDINGS_PATH
         self.is_coconut = bool(is_coconut)
         self.is_both_latent = bool(is_both_latent)
         self.bio_latent_lambda = float(bio_latent_lambda)
@@ -288,22 +288,32 @@ class Qwen3MoleculeLLM(PreTrainedModel):
 
         # ---- 2. 分子编码器和投影器 ----
         # 加载预训练的分子编码器（SMI-TED）
-        self.mol_encoder = load_smi_ted(
-            folder=self.smi_ted_folder,
-            ckpt_filename=self.smi_ted_ckpt
-        )
-
+        # self.mol_encoder = load_smi_ted(
+        #     folder=self.smi_ted_folder,
+        #     ckpt_filename=self.smi_ted_ckpt
+        # )
+        print(self.protein_embedding_folder)
         # load separate protein encoder (uses existing .h5 files)
         self.protein_encoder = load_protein_h5_encoder(
             folder=self.protein_embedding_folder,   # or "embeddings_proteins" if different
             device=self.model.device,     # place tensors on same device as LLM
             pool="none"                   # keep per-residue (L, D) so projector handles variable length
         )
+
+        # --- sanity check: verify ESM embeddings are loaded ---
+        key = list(self.protein_encoder._index.keys())[0]
+        t = self.protein_encoder.get(key)
+        print("[Protein encoder sanity check]")
+        print(" key:", key)
+        print(" shape:", t.shape)
+        print(" dtype:", t.dtype)
+        print(" device:", t.device)
+        # --- end sanity check ---
         
         # 冻结分子编码器参数
-        for param in self.mol_encoder.parameters():
-            param.requires_grad = False
-        self.mol_encoder.eval()
+        # for param in self.mol_encoder.parameters():
+        #     param.requires_grad = False
+        # self.mol_encoder.eval()
         
         # 初始化投影器，使用动态解析的参数
         self.projector = QueryAttentionProjector(
@@ -1277,7 +1287,8 @@ if __name__ == "__main__":
         'num_heads': 2
     }
     model = Qwen3MoleculeLLM(
-        qwen_model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B",
+        # qwen_model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B",
+        qwen_model_name="Qwen/Qwen3-4B",
         mol_config=mol_config
     ).cuda()
     print("Stage 3 Model Initialized Successfully!")
