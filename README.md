@@ -17,7 +17,7 @@ conda env create -f biolatent_environment1.yml
 
 conda activate biolatenecot_dev
 
-pip install trl==0.15.2 pytorch-fast-transformers==0.4.0 rdkit==2024.3.6024.3.6 peft==0.17.1  plotext wandb liger-kernel vllm
+pip install trl==0.15.2 pytorch-fast-transformers==0.4.0 rdkit==2024.3.6024.3.6 peft==0.17.1  plotext wandb liger-kernel vllm 
 
 # new env:
 
@@ -25,7 +25,7 @@ conda env create -f biolatent_environment2.yml
 
 conda activate biolatenecot_dev
 
-pip install trl==0.15.2 pytorch-fast-transformers==0.4.0 rdkit peft==0.17.1  plotext wandb liger-kernel vllm
+pip install trl==0.15.2 pytorch-fast-transformers==0.4.0 rdkit peft==0.17.1  plotext wandb liger-kernel vllm h5py fair-esm
 
 
 # 0107-1:
@@ -34,8 +34,27 @@ conda env create -f biolatent_environment2.yml
 
 conda activate biolatenecot_dev
 
-pip install trl==0.26.2 pytorch-fast-transformers==0.4.0 rdkit peft==0.17.1  plotext wandb liger-kernel vllm==0.11.2
+pip install trl==0.26.2 pytorch-fast-transformers==0.4.0 rdkit peft==0.17.1  plotext wandb liger-kernel vllm==0.11.2 h5py fair-esm
 ```
+
+📊 Data Preparation Proteins
+
+1️⃣ Download dataset
+
+The "Mol-Instructions" Dataset is an open source dataset available on HuggingFace (https://huggingface.co/datasets/zjunlp/Mol-Instructions) and GitHub (https://github.com/zjunlp/Mol-Instructions). Please follow the instructions available to download the "Protein-oriented Instructions" data and unarchive it, if required. 
+
+🧠 Embeddings
+
+Once the data is downloaded, we can move to the embedding creation stage. The embeddings will be created only for 3 files from the "Protein-oriented Instructions" folder, where the protein sequence is a clear input:
+  - "protein_function"
+  - "catalytic_activity"
+  - "domain_motif"
+
+The embeddings will be created using the ESM2 650M model. To obtain the, please run:
+```
+python proteins_moliinst_esm_embeddings.py
+```
+
 
 📊 Data Preparation
 
