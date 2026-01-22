@@ -35,6 +35,8 @@ wandb/
 .idea/
 .DS_Store
 Thumbs.db
+*.json
+*.csv
 
 # 其他临时文件
 *.log
