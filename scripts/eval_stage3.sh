@@ -3,9 +3,9 @@ set -euo pipefail
 # =========================
 # exp
 # =========================
-EXP_NAME=exp_chemllmbench_stage4_1_5
-CKPT_DIR_NAME=chemllmbench_stage4_1_5
-DATASET_NAME=ChemLLMBench/chemllmbench
+EXP_NAME=exp_chemcotbench_stage4_embedding
+CKPT_DIR_NAME=chemcotbench_stage4_embedding
+DATASET_NAME=ChemCoTBench/chemcotbench/mol_opt
 INCLUDE_TASKS=""
 CUDA_DEVICES=0,1,2,3,4
 
