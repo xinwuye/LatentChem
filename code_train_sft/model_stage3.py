@@ -16,7 +16,7 @@ from smi_ted_light.loadnew import load_smi_ted
 import torch.nn.functional as F
 from transformers.generation.utils import GenerationConfig
 from typing import Optional, List
-save_results_path="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/new_latent/stage3_latent_new.json"
+save_results_path="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/new_latent/stage3_latent_logp.json"
 import json
 @dataclass
 class BioLatentCausalLMOutputWithPast(CausalLMOutputWithPast):
@@ -1631,6 +1631,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
                     'smiles': smiles_list[b],
                     'latent_block': latent_block_cat.squeeze(0).float().cpu().numpy().tolist()
                 }
+                # print(save_data)
 
                 # 使用文件锁确保线程/进程安全
                 lock = FileLock(save_results_path + ".lock")

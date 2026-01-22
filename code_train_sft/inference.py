@@ -19,7 +19,7 @@ import json
 
 # 导入我们的自定义组件
 from model_stage3 import Qwen3MoleculeLLM
-from dataloader import load_data
+from dataloader import load_data, COCONUT_TOKENS
 from config import ModelConfig
 # from train_sft_stage2 import MultiModalDataCollator, MultiModalSFTTrainer, LoraTrainingMonitorCallback, TerminalPlotCallback
 import torch.nn.functional as F
@@ -47,12 +47,13 @@ def load_test_data(test_data_path, include_tasks, max_len=None):
     logger.info(f"Loading test/eval data from: {test_data_path} (eval_mode=True)")
 
     if "ChemCoTBench" in test_data_path:
-        dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=['drd', 'gsk','jnk','logp','sol','solubility'], max_len=max_len)
+        dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=['drd', 'gsk','jnk','qed','sol','solubility'], max_len=max_len)
         logger.info(f"Loaded tokenized eval dataset ChemCoTBench from dir: {len(dataset)} examples")
     elif "ChemCoTDataset" in test_data_path:
         dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=['rcr'], max_len=max_len)
         logger.info(f"Loaded tokenized eval dataset ChemCoTBench from dir: {len(dataset)} examples")
     else:
+    
         dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, max_len=max_len)#exclude_tasks=['molecule_design'],
         logger.info(f"Loaded tokenized eval dataset ChemCoTBench from dir: {len(dataset)} examples")
     
@@ -292,6 +293,60 @@ def inference_stage3():
         help="Enable Bio-latent thinker tokens for stage 3 (ignored for stage 1/2).",
     )
     parser.add_argument(
+        "--is_biothinker",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help="Enable BioThinker (bio-latent block) when --is_both_latent is false.",
+    )
+    parser.add_argument(
+        "--is_biothinker_multi",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help="Use BioThinkerMulti (4-expert weighted FFN) instead of BioThinker.",
+    )
+    parser.add_argument(
+        "--is_taskthinker",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help="Enable TaskThinker (task-latent block) when --is_both_latent is false.",
+    )
+    parser.add_argument(
+        "--is_taskthinker_multi",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help="Use TaskThinkerMulti (4-expert weighted MLP) instead of TaskThinker.",
+    )
+    parser.add_argument(
+        "--is_bioupdater",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help="Enable BioUpdater (memory update) when --is_both_latent is false.",
+    )
+    parser.add_argument(
+        "--is_bioupdater_multi",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help="Use BioTokenUpdaterMulti (4-expert weighted FFN) instead of BioTokenUpdater.",
+    )
+    parser.add_argument(
+        "--is_bioupdater_gating",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help="Enable BioUpdater gating (Linear+Sigmoid hard switch). When false, behavior is unchanged.",
+    )
+    parser.add_argument(
+        "--is_biothinker_gating",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help="Enable BioThinker gating (hard switch). When gate=0, bio-latent block is replaced by anchor embedding.",
+    )
+    parser.add_argument(
+        "--is_taskthinker_gating",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help="Enable TaskThinker gating (hard switch). Gate scales the MLP residual: x + gate*y.",
+    )
+    parser.add_argument(
         "--bio_latent_lambda",
         type=float,
         default=0.0,
@@ -322,11 +377,7 @@ def inference_stage3():
                         help="并行进程总数（样本分片数）")
     parser.add_argument("--gpu", type=int, default=None,
                         help="显卡 id，优先于 proc_index (如果提供则使用此 GPU)")
-
-    # 添加张量并行支持
-    parser.add_argument("--tensor_parallel_size", type=int, default=1,
-                        help="张量并行大小（使用的GPU数量），当大于1时启用张量并行")
-
+    
     args = parser.parse_args()
     
     # 1. 基础配置
@@ -344,6 +395,15 @@ def inference_stage3():
         stages = [0]
         is_coconut = False
         is_both_latent = False
+        is_biothinker = bool(args.is_biothinker)
+        is_taskthinker = bool(args.is_taskthinker)
+        is_bioupdater = bool(args.is_bioupdater)
+        is_biothinker_multi = bool(args.is_biothinker_multi)
+        is_taskthinker_multi = bool(args.is_taskthinker_multi)
+        is_bioupdater_multi = bool(args.is_bioupdater_multi)
+        is_bioupdater_gating = bool(args.is_bioupdater_gating)
+        is_biothinker_gating = bool(args.is_biothinker_gating)
+        is_taskthinker_gating = bool(args.is_taskthinker_gating)
         bio_latent_lambda = 0.0
         bio_latent_alpha = 0.5
         max_cot_string_len = 2048
@@ -353,6 +413,15 @@ def inference_stage3():
         stages = [0]
         is_coconut = False
         is_both_latent = False
+        is_biothinker = bool(args.is_biothinker)
+        is_taskthinker = bool(args.is_taskthinker)
+        is_bioupdater = bool(args.is_bioupdater)
+        is_biothinker_multi = bool(args.is_biothinker_multi)
+        is_taskthinker_multi = bool(args.is_taskthinker_multi)
+        is_bioupdater_multi = bool(args.is_bioupdater_multi)
+        is_bioupdater_gating = bool(args.is_bioupdater_gating)
+        is_biothinker_gating = bool(args.is_biothinker_gating)
+        is_taskthinker_gating = bool(args.is_taskthinker_gating)
         bio_latent_lambda = 0.0
         bio_latent_alpha = 0.5
         max_cot_string_len = 2048
@@ -361,6 +430,15 @@ def inference_stage3():
     else: # Stage 3
         is_coconut = False
         is_both_latent = bool(args.is_both_latent)
+        is_biothinker = bool(args.is_biothinker)
+        is_taskthinker = bool(args.is_taskthinker)
+        is_bioupdater = bool(args.is_bioupdater)
+        is_biothinker_multi = bool(args.is_biothinker_multi)
+        is_taskthinker_multi = bool(args.is_taskthinker_multi)
+        is_bioupdater_multi = bool(args.is_bioupdater_multi)
+        is_bioupdater_gating = bool(args.is_bioupdater_gating)
+        is_biothinker_gating = bool(args.is_biothinker_gating)
+        is_taskthinker_gating = bool(args.is_taskthinker_gating)
         bio_latent_lambda = float(args.bio_latent_lambda)
         bio_latent_alpha = float(args.bio_latent_alpha)
         max_cot_string_len = int(args.max_cot_string_len)
@@ -387,6 +465,15 @@ def inference_stage3():
             mol_config=mol_config,
             is_coconut=is_coconut,
             is_both_latent=is_both_latent,
+            is_biothinker=is_biothinker,
+            is_taskthinker=is_taskthinker,
+            is_bioupdater=is_bioupdater,
+            is_biothinker_multi=is_biothinker_multi,
+            is_taskthinker_multi=is_taskthinker_multi,
+            is_bioupdater_multi=is_bioupdater_multi,
+            is_bioupdater_gating=is_bioupdater_gating,
+            is_biothinker_gating=is_biothinker_gating,
+            is_taskthinker_gating=is_taskthinker_gating,
             bio_latent_lambda=bio_latent_lambda,
             bio_latent_alpha=bio_latent_alpha,
             max_cot_string_len=max_cot_string_len,
@@ -413,12 +500,22 @@ def inference_stage3():
         
         for param in model.bio_updater.parameters():
             param.requires_grad = False
+        if getattr(model, "bio_updater_gate", None) is not None:
+            for param in model.bio_updater_gate.parameters():
+                param.requires_grad = False
 
         if hasattr(model, "bio_thinker"):
             for param in model.bio_thinker.parameters():
                 param.requires_grad = False
+        if getattr(model, "bio_thinker_gate", None) is not None:
+            for param in model.bio_thinker_gate.parameters():
+                param.requires_grad = False
+                
         if hasattr(model, "task_thinker"):
             for param in model.task_thinker.parameters():
+                param.requires_grad = False
+        if getattr(model, "task_thinker_gate", None) is not None:
+            for param in model.task_thinker_gate.parameters():
                 param.requires_grad = False
         
         model.model.eval()

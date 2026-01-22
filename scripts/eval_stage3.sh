@@ -3,8 +3,144 @@ set -euo pipefail
 # =========================
 # exp
 # =========================
-EXP_NAME=exp_chemcotbench_stage4_embedding
-CKPT_DIR_NAME=chemcotbench_stage4_embedding
+
+EXP_NAME="124-taskthinker-bioupdater_matrix"
+CKPT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/124-taskthinker-bioupdater/stage4"
+TEMPERATURE=0.7
+IS_BOTH_LATENT=false
+IS_BIOTHINKER=false
+IS_TASKTHINKER=true
+IS_BIOUPDATER=true
+IS_BIOTHINKER_MULTI=false
+IS_TASKTHINKER_MULTI=false
+IS_BIOUPDATER_MULTI=false
+IS_BIOTHINKER_GATING=false
+IS_TASKTHINKER_GATING=false
+IS_BIOUPDATER_GATING=false
+TASK_LATENT_MAX_STEPS=10
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --exp-name)
+      EXP_NAME="$2"
+      shift 2
+      ;;
+    --exp_name)
+      EXP_NAME="$2"
+      shift 2
+      ;;
+    --ckpt-dir)
+      CKPT_DIR="$2"
+      shift 2
+      ;;
+    --ckpt_dir)
+      CKPT_DIR="$2"
+      shift 2
+      ;;
+    --temperature)
+      TEMPERATURE="$2"
+      shift 2
+      ;;
+    --is-both-latent)
+      IS_BOTH_LATENT="$2"
+      shift 2
+      ;;
+    --is_both_latent)
+      IS_BOTH_LATENT="$2"
+      shift 2
+      ;;
+    --task-latent-max-steps)
+      TASK_LATENT_MAX_STEPS="$2"
+      shift 2
+      ;;
+    --task_latent_max_steps)
+      TASK_LATENT_MAX_STEPS="$2"
+      shift 2
+      ;;
+    --is-biothinker)
+      IS_BIOTHINKER="$2"
+      shift 2
+      ;;
+    --is_biothinker)
+      IS_BIOTHINKER="$2"
+      shift 2
+      ;;
+    --is-taskthinker)
+      IS_TASKTHINKER="$2"
+      shift 2
+      ;;
+    --is_taskthinker)
+      IS_TASKTHINKER="$2"
+      shift 2
+      ;;
+    --is-bioupdater)
+      IS_BIOUPDATER="$2"
+      shift 2
+      ;;
+    --is_bioupdater)
+      IS_BIOUPDATER="$2"
+      shift 2
+      ;;
+    --is-biothinker-multi)
+      IS_BIOTHINKER_MULTI="$2"
+      shift 2
+      ;;
+    --is_biothinker_multi)
+      IS_BIOTHINKER_MULTI="$2"
+      shift 2
+      ;;
+    --is-taskthinker-multi)
+      IS_TASKTHINKER_MULTI="$2"
+      shift 2
+      ;;
+    --is_taskthinker_multi)
+      IS_TASKTHINKER_MULTI="$2"
+      shift 2
+      ;;
+    --is-bioupdater-multi)
+      IS_BIOUPDATER_MULTI="$2"
+      shift 2
+      ;;
+    --is_bioupdater_multi)
+      IS_BIOUPDATER_MULTI="$2"
+      shift 2
+      ;;
+    --is-biothinker-gating)
+      IS_BIOTHINKER_GATING="$2"
+      shift 2
+      ;;
+    --is_biothinker_gating)
+      IS_BIOTHINKER_GATING="$2"
+      shift 2
+      ;;
+    --is-taskthinker-gating)
+      IS_TASKTHINKER_GATING="$2"
+      shift 2
+      ;;
+    --is_taskthinker_gating)
+      IS_TASKTHINKER_GATING="$2"
+      shift 2
+      ;;
+    --is-bioupdater-gating)
+      IS_BIOUPDATER_GATING="$2"
+      shift 2
+      ;;
+    --is_bioupdater_gating)
+      IS_BIOUPDATER_GATING="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1"
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -z "${EXP_NAME}" || -z "${CKPT_DIR}" ]]; then
+  echo "Usage: $0 --exp-name <EXP_NAME> --ckpt-dir <CKPT_DIR> [...]"
+  exit 1
+fi
+
 DATASET_NAME=ChemCoTBench/chemcotbench/mol_opt
 INCLUDE_TASKS=""
 CUDA_DEVICES=0,1,2,3,4
@@ -15,41 +151,89 @@ CUDA_DEVICES=0,1,2,3,4
 BATCH_SIZE=8
 NUM_RETURN_SEQUENCES=1
 MAX_NEW_TOKENS=2048
-TEMPERATURE=1.5
 TOP_P=0.9
 MAX_SEQ_LENGTH=8192
 
 # Stage-3 specific
 TRAINING_STAGE=3
 C_THOUGHT=2
-IS_BOTH_LATENT=true
 BIO_LATENT_LAMBDA=0.0
 BIO_LATENT_ALPHA=0.5
 MAX_COT_STRING_LEN=2048
-TASK_LATENT_MAX_STEPS=10
 MAX_TEST_SAMPLES=""
-TENSOR_PARALLEL_SIZE=5
 
 # =========================
 # path
 # =========================
 SCRIPT_PATH="code_train_sft/inference.py"
 OUTPUT_DIR="outputs/${EXP_NAME}"
-CKPT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/124-FreezeLatent/stage4"
 LORA_PATH="${CKPT_DIR}/lora_weights"
 PROJECTOR_PATH="${CKPT_DIR}/mm_projector.pt"
 DATA_PATH="data/${DATASET_NAME}"
 
 PYTHON_BIN="python"
 
+is_true() {
+  local v="${1:-}"
+  v="${v,,}"
+  case "${v}" in
+    1|true|yes|y) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-LOG_NAME="${EXP_NAME}_${TIMESTAMP}"
-LOG_NAME="${LOG_NAME//\//_}"
+
+LOG_PARTS=()
+LOG_PARTS+=("${EXP_NAME}")
+LOG_PARTS+=("${TIMESTAMP}")
+
+if is_true "${IS_BOTH_LATENT}"; then
+  LOG_PARTS+=("BOTH_LATENT")
+fi
+if is_true "${IS_BIOTHINKER}"; then
+  LOG_PARTS+=("BIOTHINKER")
+fi
+if is_true "${IS_TASKTHINKER}"; then
+  LOG_PARTS+=("TASKTHINKER")
+fi
+if is_true "${IS_BIOUPDATER}"; then
+  LOG_PARTS+=("BIOUPDATER")
+fi
+if is_true "${IS_BIOTHINKER_MULTI}"; then
+  LOG_PARTS+=("BIOTHINKER_MULTI")
+fi
+if is_true "${IS_TASKTHINKER_MULTI}"; then
+  LOG_PARTS+=("TASKTHINKER_MULTI")
+fi
+if is_true "${IS_BIOUPDATER_MULTI}"; then
+  LOG_PARTS+=("BIOUPDATER_MULTI")
+fi
+if is_true "${IS_BIOTHINKER_GATING}"; then
+  LOG_PARTS+=("BIOTHINKER_GATING")
+fi
+if is_true "${IS_TASKTHINKER_GATING}"; then
+  LOG_PARTS+=("TASKTHINKER_GATING")
+fi
+if is_true "${IS_BIOUPDATER_GATING}"; then
+  LOG_PARTS+=("BIOUPDATER_GATING")
+fi
+
+LOG_PARTS+=("T${TEMPERATURE}")
+LOG_PARTS+=("${DATASET_NAME}")
+LOG_PARTS+=("TASKMAX${TASK_LATENT_MAX_STEPS}")
+
+IFS='_'
+RAW_LOG_NAME="${LOG_PARTS[*]}"
+unset IFS
+LOG_NAME="${RAW_LOG_NAME//\//_}"
+LOG_NAME="${LOG_NAME//./}"
+LOG_NAME="${LOG_NAME// /_}"
+
 INFERENCE_RESULTS_PATH="${OUTPUT_DIR}/results/inference_results_${TIMESTAMP}.json"
 
 echo "========== Stage-3 Inference Runner =========="
 echo "EXP_NAME:                  ${EXP_NAME}"
-echo "CKPT_DIR_NAME:             ${CKPT_DIR_NAME}"
 echo "DATASET_NAME:              ${DATASET_NAME}"
 echo "SCRIPT_PATH:               ${SCRIPT_PATH}"
 echo "CKPT_DIR:                  ${CKPT_DIR}"
@@ -59,6 +243,16 @@ echo "DATA_PATH:                 ${DATA_PATH}"
 echo "TRAINING_STAGE:            ${TRAINING_STAGE}"
 echo "C_THOUGHT:                 ${C_THOUGHT}"
 echo "IS_BOTH_LATENT:            ${IS_BOTH_LATENT}"
+echo "IS_BIOTHINKER:             ${IS_BIOTHINKER}"
+echo "IS_TASKTHINKER:            ${IS_TASKTHINKER}"
+echo "IS_BIOUPDATER:             ${IS_BIOUPDATER}"
+echo "IS_BIOTHINKER_MULTI:       ${IS_BIOTHINKER_MULTI}"
+echo "IS_TASKTHINKER_MULTI:      ${IS_TASKTHINKER_MULTI}"
+echo "IS_BIOUPDATER_MULTI:       ${IS_BIOUPDATER_MULTI}"
+echo "IS_BIOTHINKER_GATING:      ${IS_BIOTHINKER_GATING}"
+echo "IS_TASKTHINKER_GATING:     ${IS_TASKTHINKER_GATING}"
+echo "IS_BIOUPDATER_GATING:      ${IS_BIOUPDATER_GATING}"
+echo "TASK_LATENT_MAX_STEPS:     ${TASK_LATENT_MAX_STEPS}"
 echo "INFERENCE_RESULTS_PATH:    ${INFERENCE_RESULTS_PATH}"
 echo "LOG_NAME:                  ${LOG_NAME}"
 if [[ -n "${CUDA_DEVICES}" ]]; then
@@ -128,6 +322,15 @@ for idx in "${!GPU_ARRAY[@]}"; do
     --temperature "${TEMPERATURE}"
     --top_p "${TOP_P}"
     --is_both_latent "${IS_BOTH_LATENT}"
+    --is_biothinker "${IS_BIOTHINKER}"
+    --is_taskthinker "${IS_TASKTHINKER}"
+    --is_bioupdater "${IS_BIOUPDATER}"
+    --is_biothinker_multi "${IS_BIOTHINKER_MULTI}"
+    --is_taskthinker_multi "${IS_TASKTHINKER_MULTI}"
+    --is_bioupdater_multi "${IS_BIOUPDATER_MULTI}"
+    --is_biothinker_gating "${IS_BIOTHINKER_GATING}"
+    --is_taskthinker_gating "${IS_TASKTHINKER_GATING}"
+    --is_bioupdater_gating "${IS_BIOUPDATER_GATING}"
     --bio_latent_lambda "${BIO_LATENT_LAMBDA}"
     --bio_latent_alpha "${BIO_LATENT_ALPHA}"
     --max_cot_string_len "${MAX_COT_STRING_LEN}"
@@ -136,7 +339,6 @@ for idx in "${!GPU_ARRAY[@]}"; do
     --proc_index "${PROC_INDEX}"
     --num_procs "${NUM_PROCS}"
     --gpu "${GPU_ID}"
-    --tensor_parallel_size "${TENSOR_PARALLEL_SIZE}"
   )
 
   if [[ -n "${MAX_TEST_SAMPLES}" ]]; then
@@ -180,10 +382,11 @@ cd eval || {
 }
 
 EVAL_CMD=(
-  "${PYTHON_BIN}" "results_merge.py"
+  "${PYTHON_BIN}" "eval_results.py"
   --result_path "../${INFERENCE_RESULTS_PATH}"
   --log_name "${LOG_NAME}"
   --dataset_paths "../${DATA_PATH}"
+  --num_samples "${NUM_RETURN_SEQUENCES}"
 )
 
 echo "Running evaluation command:" | tee -a "../${LOG_FILE}"
@@ -198,10 +401,8 @@ else
   exit 20
 fi
 
-popd > /dev/null
-
 echo "All done."
 echo "Inference results: ${INFERENCE_RESULTS_PATH}"
 echo "Eval log name: ${LOG_NAME}"
 echo "Full log: ${LOG_FILE}"
-echo "====================================================="d
+echo "====================================================="

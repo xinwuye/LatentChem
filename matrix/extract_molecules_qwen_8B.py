@@ -19,7 +19,7 @@ model = AutoModel.from_pretrained(
 model.eval()  # 设置为评估模式
 
 # 2. 分子 SMILES 列表
-json_file_path = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemCoTBench/chemcotbench/mol_opt/qed.json"
+json_file_path = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemCoTBench/chemcotbench/mol_opt/logp.json"
 
 # Extract all source molecules
 smiles_list = extract_source_molecules(json_file_path)
@@ -66,12 +66,12 @@ sim_matrix = cosine_similarity(embeddings)
 
 # 转为 DataFrame 并保存
 df_sim = pd.DataFrame(
-    sim_matrix
-    # index=smiles_list,
-    # columns=smiles_list
+    sim_matrix,
+    index=smiles_list,
+    columns=smiles_list
 )
 
 # 保存到 CSV
-df_sim.to_csv("/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/qwen3_smiles_similarity_prompt.csv", float_format="%.4f")
-print("相似度矩阵已保存到 qwen3_smiles_similarity_prompt.csv")
+df_sim.to_csv("/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/qwen3_smiles_similarity_string_lop.csv", float_format="%.4f")
+print("相似度矩阵已保存到 qwen3_smiles_similarity_lop.csv")
 print(df_sim)

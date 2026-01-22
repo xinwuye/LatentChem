@@ -5,6 +5,7 @@ from rdkit.Chem import AllChem
 from rdkit import DataStructs
 import numpy as np
 import pandas as pd
+from answer_result_and_match import extract_final_target_molecule,get_all_final_target_molecules
 def extract_source_molecules(json_file_path):
     """
     Extract all Source Molecules from the qed.json file.
@@ -48,12 +49,17 @@ def generate_fingerprints(smiles_list, radius=2, n_bits=1024):
     """
     fingerprints = []
     for smiles in smiles_list:
+        if smiles is None or smiles.strip() == "":
+            smiles = "C"  # Use methane as a placeholder for invalid SMILES
         mol = Chem.MolFromSmiles(smiles)
         if mol is not None:
             fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
             fingerprints.append(fp)
         else:
-            raise ValueError(f"Invalid SMILES: {smiles}")
+            mol = Chem.MolFromSmiles("C")  # Use methane as a placeholder for invalid SMILES
+            fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
+            fingerprints.append(fp)
+            # raise ValueError(f"Invalid SMILES: {smiles}")
     return fingerprints
 def calculate_similarity_matrix(fingerprints,molecules):
     """
@@ -80,17 +86,24 @@ def calculate_similarity_matrix(fingerprints,molecules):
     )
 
 # 5. 写入 CSV 文件
-    output_file = "molecular_similarity_matrix_new.csv"
+    output_file = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/molecular_similarity_matrix_lop_answer.csv"
     df.to_csv(output_file, float_format="%.4f")
     print(f"相似度矩阵已保存到: {output_file}")
     
     return similarity_matrix
 def main():
     # Specify the path to your JSON file
-    json_file_path = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemCoTBench/chemcotbench/mol_opt/qed.json"
     
-    # Extract all source molecules
-    molecules = extract_source_molecules(json_file_path)
+    
+    # json_file_path = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemCoTBench/chemcotbench/mol_opt/logp.json"
+    
+    # # Extract all source molecules
+    # molecules = extract_source_molecules(json_file_path)
+    
+    #get from answer
+    path = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/outputs/124-taskthinker-bioupdater_matrix/results/124-taskthinker.json"
+    molecules=get_all_final_target_molecules(path)
+    print(molecules)
     #get fignerprints
     fingerprints = generate_fingerprints(molecules)
     
