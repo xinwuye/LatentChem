@@ -31,7 +31,9 @@ def evaluate_mol(model_name: str, subtask: str, gt_path, log_dir):
     for i, sample in enumerate(samples):
         gt = gt_raw[i]['gt']
         if subtask in ['major_product', 'byproduct']:
-            gt = json.loads(gt)
+            # Handle both string and dict formats for gt
+            if isinstance(gt, str):
+                gt = json.loads(gt)
             gts.append(gt.get(subtask_to_result_key[subtask], ''))
         # elif subtask == 'retro':
         #     if len(gt) == 0:

@@ -364,7 +364,10 @@ class MolEditEvaluator(BaseTaskEvaluator):
         '''
         return ""
     def prepare_metadata(self, sample):
-        meta = json.loads(sample['meta'])
+        meta = sample['meta']
+        # Handle both string and dict formats for meta
+        if isinstance(meta, str):
+            meta = json.loads(meta)
         meta['task'] = sample['subtask']
         return meta
     

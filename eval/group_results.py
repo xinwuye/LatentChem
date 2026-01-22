@@ -37,12 +37,14 @@ def build_grouped_save_data(
     for path in files_to_read:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read().strip()
+            # print(content)
 
             # Check if the file contains multiple JSON objects concatenated together
             # This is common when JSONL (JSON Lines) format is saved incorrectly
             try:
                 # First, try to parse as a single JSON object
                 data = json.loads(content)
+                # print(data)
                 # If successful, check if it has the expected structure
                 if "test_results" in data:
                     merged_results.extend(data["test_results"])
@@ -158,4 +160,4 @@ def build_grouped_save_data(
         task_path = os.path.join(task_dir, f'{log_name}.json')
         with open(task_path, 'w') as f:
             json.dump(group, f, ensure_ascii=False, indent=4)
-build_grouped_save_data("/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/outputs/exp_chemllmbench_stage3_1_5_no/results/merge.json","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/chemllmbench/", "inference_result_1_5_no")
+build_grouped_save_data("/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/outputs/exp_chemllmbench_stage3_0_7_no/results/merge.json","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/chemllmbench/", "inference_result_0_7_no")

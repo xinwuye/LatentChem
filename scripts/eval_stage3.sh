@@ -3,8 +3,8 @@ set -euo pipefail
 # =========================
 # exp
 # =========================
-EXP_NAME=exp_chemllmbench_stage3_1_5_no
-CKPT_DIR_NAME=chemllmbench_stage3_1_5_no
+EXP_NAME=exp_chemllmbench_stage4_1_5
+CKPT_DIR_NAME=chemllmbench_stage4_1_5
 DATASET_NAME=ChemLLMBench/chemllmbench
 INCLUDE_TASKS=""
 CUDA_DEVICES=0,1,2,3,4
@@ -22,7 +22,7 @@ MAX_SEQ_LENGTH=8192
 # Stage-3 specific
 TRAINING_STAGE=3
 C_THOUGHT=2
-IS_BOTH_LATENT=false
+IS_BOTH_LATENT=true
 BIO_LATENT_LAMBDA=0.0
 BIO_LATENT_ALPHA=0.5
 MAX_COT_STRING_LEN=2048
@@ -35,7 +35,7 @@ TENSOR_PARALLEL_SIZE=5
 # =========================
 SCRIPT_PATH="code_train_sft/inference.py"
 OUTPUT_DIR="outputs/${EXP_NAME}"
-CKPT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/final_model/stage4-lr2e-4-cf_margin01-freeze_llm-freeze_projector-1247-lr1e-5-temp15-nonlatent/stage4"
+CKPT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/124-FreezeLatent/stage4"
 LORA_PATH="${CKPT_DIR}/lora_weights"
 PROJECTOR_PATH="${CKPT_DIR}/mm_projector.pt"
 DATA_PATH="data/${DATASET_NAME}"

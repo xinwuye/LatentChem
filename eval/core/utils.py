@@ -54,8 +54,8 @@ answer_pattern = re.compile(r'<answer\s*>(.*?)</answer\s*>', flags=re.S)
 
 def extract_answer(str_input):
     matches = re.findall(answer_pattern, str_input)
-    last_content = matches[-1].strip() if matches else None
-    return last_content
+    first_content = matches[0].strip() if matches else None
+    return first_content
 
 def parse_raw_response(
     raw_response: str,

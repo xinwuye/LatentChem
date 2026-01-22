@@ -53,7 +53,10 @@ def evaluate_molopt_score(model_name, gt_path, logs_dir, results_dir, num_sample
                 continue
             tgt_smiles_list.append(answer)
             gt = gts[i]
-            meta = json.loads(gt['meta'])
+            meta = gt['meta']
+            # Handle both string and dict formats for meta
+            if isinstance(meta, str):
+                meta = json.loads(meta)
             src_smiles_list.append(meta['molecule'])
         
         logger.debug(len(pred_results), invalid_number, len(src_smiles_list))
