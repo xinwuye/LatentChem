@@ -5,7 +5,10 @@ models/
 *.safetensors
 *.pth
 *.ckpt
-
+*.ckpt
+*.gz
+refined/
+result/
 # 数据集 (Datasets)
 ChemCotDataset/
 data/

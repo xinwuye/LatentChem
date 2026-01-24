@@ -5,6 +5,7 @@ from rdkit.Chem import AllChem
 from rdkit import DataStructs
 import numpy as np
 import pandas as pd
+from answer_result_and_match import get_all_final_target_molecules
 import argparse
 
 def extract_source_molecules(json_file_path):
@@ -23,10 +24,7 @@ def extract_source_molecules(json_file_path):
     molecules = []
     
     for entry in data:
-        # Extract the query field which contains the Source Molecule
         query = entry.get("query", "")
-        
-        # Use regex to find the Source Molecule part
         match = re.search(r"Source Molecule:\s*([^\n]+)", query)
         
         if match:
@@ -98,11 +96,13 @@ def main():
     parser = argparse.ArgumentParser(description="Calculate molecular similarity matrix.")
     parser.add_argument("--json_file", type=str, required=True, help="Path to the input JSON file.")
     parser.add_argument("--output_file", type=str, required=True, help="Path to save the similarity matrix CSV file.")
+    parser.add_argument("--answer_file", type=str, required=True, help="Path to the answer JSON file.")
+    parser.add_argument("--reference_path_file", type=str, required=True, help="Path to the answer JSON file.")
     
     args = parser.parse_args()
     
-    # Extract all source molecules
-    molecules = extract_source_molecules(args.json_file)
+    # Get all final target molecules from the answer file
+    molecules = get_all_final_target_molecules(args.answer_file,args.reference_path_file)
     
     # Generate fingerprints
     fingerprints = generate_fingerprints(molecules)

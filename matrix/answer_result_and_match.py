@@ -71,13 +71,13 @@ def load_concatenated_json(path):
     return objs
 
 # ---------- 主逻辑开始 ----------
-def get_all_final_target_molecules(path):
+def get_all_final_target_molecules(path,reference_path):
    
     data = load_concatenated_json(path)
 
     # 给定的 smiles 列表（按这个顺序输出）
     # 2. 分子 SMILES 列表
-    json_file_path = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemCoTBench/chemcotbench/mol_opt/logp.json"
+    json_file_path = reference_path
     # Extract all source molecules
     smiles_list = extract_source_molecules(json_file_path)
 
@@ -98,6 +98,9 @@ def get_all_final_target_molecules(path):
         for smiles in smiles_list
     ]
     return all_results
+
+
+
     # 输出
     # print(all_results)
     # print(len(all_results))

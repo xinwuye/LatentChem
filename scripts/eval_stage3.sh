@@ -3,8 +3,8 @@ set -euo pipefail
 # =========================
 # exp
 # =========================
-
-EXP_NAME="124-taskthinker-bioupdater_matrix"
+DATASET_NAME=ChemCoTBench/chemcotbench/mol_opt
+EXP_NAME="124-taskthinker-bioupdater_matrix_drd"
 CKPT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/124-taskthinker-bioupdater/stage4"
 TEMPERATURE=0.7
 IS_BOTH_LATENT=false
@@ -18,6 +18,7 @@ IS_BIOTHINKER_GATING=false
 IS_TASKTHINKER_GATING=false
 IS_BIOUPDATER_GATING=false
 TASK_LATENT_MAX_STEPS=10
+CUDA_DEVICES=4
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -141,9 +142,9 @@ if [[ -z "${EXP_NAME}" || -z "${CKPT_DIR}" ]]; then
   exit 1
 fi
 
-DATASET_NAME=ChemCoTBench/chemcotbench/mol_opt
+
 INCLUDE_TASKS=""
-CUDA_DEVICES=0,1,2,3,4
+
 
 # =========================
 # inference config

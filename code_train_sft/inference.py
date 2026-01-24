@@ -47,7 +47,7 @@ def load_test_data(test_data_path, include_tasks, max_len=None):
     logger.info(f"Loading test/eval data from: {test_data_path} (eval_mode=True)")
 
     if "ChemCoTBench" in test_data_path:
-        dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=['drd', 'gsk','jnk','qed','sol','solubility'], max_len=max_len)
+        dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=['gsk', 'jnk','logp','solubility','sol','qed'], max_len=max_len)
         logger.info(f"Loaded tokenized eval dataset ChemCoTBench from dir: {len(dataset)} examples")
     elif "ChemCoTDataset" in test_data_path:
         dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=['rcr'], max_len=max_len)
