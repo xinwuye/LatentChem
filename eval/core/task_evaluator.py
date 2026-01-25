@@ -43,7 +43,10 @@ class BaseTaskEvaluator(ABC):
             return json.load(f)
 
     def _load_gt_raw(self, gt_path: str, taskname: str) -> List[Any]:
-        path = os.path.join(gt_path, taskname + '.json')
+        if taskname=='ligand' or taskname=='reactant' or taskname=='solvent':
+            path=os.path.join(gt_path, 'reagent_selection', taskname + '.json')
+        else:
+            path = os.path.join(gt_path,taskname,taskname + '.json')
         if not os.path.exists(path):
             raise ValueError(f"gt file not found: {path}")
         with open(path, 'r') as f:
@@ -169,7 +172,10 @@ class BaseTaskEvaluator(ABC):
         metric_name_order: List[str] = []
 
         for i, sample in enumerate(samples):
-            gt = self.extract_gt(gt_raw[i], task_name)
+            if gt_raw[i]['task'] == "reagent_selection":
+                gt=gt_raw[i]['meta']['candidate_rank']
+            else:
+                gt = self.extract_gt(gt_raw[i], task_name)
             metadata = self.prepare_metadata(gt_raw[i])
 
             # 处理单预测格式
@@ -256,8 +262,10 @@ class MolSimiliarityTaskEvaluator(BaseTaskEvaluator):
         from core.evaluator import MoleculeSMILESEvaluator
         self.evaluator = MoleculeSMILESEvaluator()
     def extract_gt(self, gt_raw_item: Dict[str, Any], task_name: str) -> Any:
+
         meta = gt_raw_item['meta']
-        meta = json.loads(meta)
+        print(meta)
+        # meta = json.loads(meta)
         return meta['reference']
     
     def evaluate_predictions(self, preds: List[List[str]], gts: List[Any], total_len: int, metadata: Optional[List[List[Dict[str, Any]]]] = None, task_name = None) -> Dict[str, float]:

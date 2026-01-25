@@ -28,6 +28,7 @@ metric_of_interest = ['exact_match',
 def eval_single_pair(task_name, dir, model_A, model_B):
     try:
         df_A = pd.read_csv(os.path.join(dir, 'eval_results_' + model_A + '.csv'))
+        print(df_A)
         df_B = pd.read_csv(os.path.join(dir, 'eval_results_' + model_B + '.csv'))
     except:
         return 0, 0

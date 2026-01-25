@@ -1,3 +1,4 @@
+
 from ChemLLMBench.core.metrics import exact_match
 from core.utils import extract_answer
 import logging
@@ -5,6 +6,8 @@ import json
 import os
 
 logger = logging.getLogger(__name__)
+
+from core.task_evaluator import MolSimiliarityTaskEvaluator
 
 def eval_retro_from_list(pred_list, gt_list, task, total_length):
     correct_num = 0
@@ -16,37 +19,19 @@ def eval_retro_from_list(pred_list, gt_list, task, total_length):
         "correct_rate": correct_num / total_length,
         f"{task}_valid_rate" : len(pred_list) / total_length
     }
-    
-def evaluate_retro_score(model_name, gt_path, logs_dir, results_dir):
-    result_dict = dict()
-    
-    for task in ['retro']:
-        logger.info(f'evaluating {task} for model {model_name}')
-        file_name = f"{logs_dir}/{task}/{model_name}.json" 
-        pred_results = json.load(open(file_name, "r"))
+
+def evaluate_retro_score(model_name,  gt_path, logs_dir, results_dir, sample_count=1):
+    mol_design_evaluator = MolSimiliarityTaskEvaluator()
+    result = mol_design_evaluator.evaluate_score(model_name, sample_count, gt_path, logs_dir, "retro")
+    os.makedirs(os.path.join(results_dir, 'retro'), exist_ok=True)
+    with open(os.path.join(results_dir, 'retro', f'{model_name}_{sample_count}.json'), 'w') as f:
+        json.dump(result, f, indent=4)
+    return result
+
+def record_retro_results(model_name, gt_path, logs_dir, results_dir, sample_count = 1):
+    evaluator = MolSimiliarityTaskEvaluator()
         
-        gt_name = f"{gt_path}/{task}.json"
-        gts = json.load(open(gt_name, "r"))
+    dataframe = evaluator.record_results(model_name, sample_count, gt_path, logs_dir, "retro")
         
-        invalid_number = 0
-        pred_list, gt_list = list(), list()
-        
-        for i, pred in enumerate(pred_results):
-            answer = extract_answer(pred['result'])
-            if answer is None:
-                invalid_number += 1
-                continue
-            pred_list.append(answer)
-            gt = gts[i]
-            meta = json.loads(gt['meta'])
-            gt_list.append(meta['reference'])
-        
-        assert len(gt_list) == len(pred_list)
-        
-        result_dict[task] = eval_retro_from_list(pred_list, gt_list, task, len(pred_results))
-    
-    logger.info(f"eval_score_{model_name}_retro:\n\r{result_dict}")
     os.makedirs(f"{results_dir}/retro", exist_ok=True)
-    json.dump(result_dict, open(f"{results_dir}/retro/eval_score_{model_name}.json", "w"), indent=4)
-    
-    return result_dict
+    dataframe.to_csv(f"{results_dir}/retro/eval_results_{model_name}.csv", index=False)

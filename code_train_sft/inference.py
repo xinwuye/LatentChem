@@ -53,7 +53,7 @@ def load_test_data(test_data_path, include_tasks, max_len=None):
         dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=['rcr'], max_len=max_len)
         logger.info(f"Loaded tokenized eval dataset ChemCoTBench from dir: {len(dataset)} examples")
     else:
-        dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=[], max_len=max_len)
+        dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, max_len=max_len)
         logger.info(f"Loaded tokenized eval dataset from dir: {len(dataset)} examples")
     
     return dataset

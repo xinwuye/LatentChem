@@ -27,7 +27,7 @@ current_dir = os.path.dirname(current_file)
 logs_dir = os.path.join(current_dir, 'logs')
 results_dir = os.path.join(current_dir, 'results')
 records_dir = os.path.join(current_dir, 'records')
-
+print(results_dir)
 os.makedirs(logs_dir, exist_ok=True)
 build_grouped_save_data(result_path, logs_dir, log_name)
 
@@ -40,8 +40,11 @@ for dataset_path in dataset_paths:
             record_all_ChemCoTBench(log_name, dataset_path, logs_dir, records_dir, num_samples)
     
     if 'ChemLLMBench' in dataset_path:
-        from ChemLLMBench.eval_all import eval_all_ChemLLMBench
-        eval_all_ChemLLMBench(log_name, dataset_path, logs_dir, results_dir, num_samples)
+        from ChemLLMBench.eval_all import eval_all_ChemLLMBench, record_all_ChemLLMBench
+        if mode == 'score':
+            eval_all_ChemLLMBench(log_name, dataset_path, logs_dir, results_dir)
+        elif mode == 'record':
+            record_all_ChemLLMBench(log_name, dataset_path, logs_dir, records_dir)
     
     if 'ChemCoTDataset-test' in dataset_path:
         from ChemCoTDataset_textwise.eval_all import eval_all_ChemCoTDataset_textwise

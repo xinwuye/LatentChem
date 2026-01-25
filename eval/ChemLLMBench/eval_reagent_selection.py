@@ -1,10 +1,24 @@
-from core.utils import extract_answer
-from ChemLLMBench.core.metrics import try_canonicalize_smiles
+import sys
 import logging
 import json
 import os
 
+# Import from local core directory
+local_core_dir = os.path.join(os.path.dirname(__file__), 'core')
+if local_core_dir not in sys.path:
+    sys.path.insert(0, local_core_dir)
+
+from core.utils import extract_answer
+from core.task_evaluator import BaseTaskEvaluator
+from metrics import try_canonicalize_smiles
+
 logger = logging.getLogger(__name__)
+
+topk_dict = {
+    "ligand": 5,
+    "reactant": 1,
+    "solvent": 1
+}
 
 def eval_topk(ranked_list, pred, topk = 1):
     top_list = ranked_list[:topk]
@@ -25,43 +39,45 @@ def eval_reagent_selection_from_list(pred_list, gt_list, task, top_k, total_leng
         "correct_rate": correct_num / total_length,
         f"{task}_valid_rate" : len(pred_list) / total_length
     }
+
+class ReagentSelectionEvaluator(BaseTaskEvaluator):
+    def extract_gt(self, gt_raw_item, task_name):
+        meta = gt_raw_item['meta']
+        if isinstance(meta, str):
+            meta = json.loads(meta)
+        candidate_rank = meta['candidate_rank']
+        # print(candidate_rank)
+        if isinstance(candidate_rank, str):
+            candidate_rank =candidate_rank
+        return candidate_rank
     
-def evaluate_reagent_selection_score(model_name, gt_path, logs_dir, results_dir):
+    def prepare_metadata(self, sample):
+        return None
+    
+    def evaluate_predictions(self, preds, gts, total_len, metadata, task_name):
+        return eval_reagent_selection_from_list(preds, gts, task_name, topk_dict[task_name], total_len)
+
+def evaluate_reagent_selection_score(model_name, gt_path, logs_dir, results_dir, sample_count = 1): 
     result_dict = dict()
-    
-    topk_dict = {
-        "ligand": 5,
-        "reactant": 1,
-        "solvent": 1
-    }
+    evaluator = ReagentSelectionEvaluator()
     
     for task in topk_dict.keys():
         logger.info(f'evaluating {task} for model {model_name}')
-        file_name = f"{logs_dir}/{task}/{model_name}.json" 
-        pred_results = json.load(open(file_name, "r"))
         
-        gt_name = f"{gt_path}/{task}.json"
-        gts = json.load(open(gt_name, "r"))
-        
-        invalid_number = 0
-        pred_list, gt_list = list(), list()
-        
-        for i, pred in enumerate(pred_results):
-            answer = extract_answer(pred['result'])
-            if answer is None:
-                invalid_number += 1
-                continue
-            pred_list.append(answer)
-            gt = gts[i]
-            meta = json.loads(gt['meta'])
-            gt_list.append(meta['candidate_rank'])
-        
-        assert len(gt_list) == len(pred_list)
-        
-        result_dict[task] = eval_reagent_selection_from_list(pred_list, gt_list, task, len(pred_results))
+        result_dict[task] = evaluator.evaluate_score(model_name, sample_count, gt_path, logs_dir, task)
     
     logger.info(f"eval_score_{model_name}_reagent_selection:\n\r{result_dict}")
     os.makedirs(f"{results_dir}/reagent_selection", exist_ok=True)
     json.dump(result_dict, open(f"{results_dir}/reagent_selection/eval_score_{model_name}.json", "w"), indent=4)
     
     return result_dict
+
+def record_reagent_selection_results(model_name, gt_path, logs_dir, results_dir, sample_count = 1):
+    evaluator = ReagentSelectionEvaluator()
+    for task in topk_dict.keys():
+        logger.info(f'recording {task} for model {model_name}')
+        
+        dataframe = evaluator.record_results(model_name, sample_count, gt_path, logs_dir, task)
+        
+        os.makedirs(f"{results_dir}/reagent_selection/{task}", exist_ok=True)
+        dataframe.to_csv(f"{results_dir}/reagent_selection/{task}/eval_results_{model_name}.csv", index=False)

@@ -4,8 +4,8 @@ set -euo pipefail
 # exp
 # =========================
 
-EXP_NAME=""
-CKPT_DIR=""
+EXP_NAME="nocot-chemllmbench_07"
+CKPT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/nocot"
 TEMPERATURE=0.7
 IS_BOTH_LATENT=false
 IS_BIOTHINKER=false
@@ -186,14 +186,14 @@ if [[ -z "${EXP_NAME}" || -z "${CKPT_DIR}" ]]; then
   exit 1
 fi
 
-DATASET_NAME=ChemCoTBench
+DATASET_NAME=ChemLLMBench/chemllmbench
 INCLUDE_TASKS=""
-CUDA_DEVICES=0,1
+CUDA_DEVICES=0,1,2,3,4
 
 # =========================
 # inference config
 # =========================
-BATCH_SIZE=4
+BATCH_SIZE=8
 NUM_RETURN_SEQUENCES=1
 MAX_NEW_TOKENS=2048
 TOP_P=0.9
