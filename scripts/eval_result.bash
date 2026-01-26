@@ -8,7 +8,7 @@ set -euo pipefail
 model="nocot"
 INPUT_FOLDER="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/outputs/noncot-chemllmbench_07/results"
 OUTPUT_FILE="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/outputs/nocot-chemllmbench_07/results/merged.json"
-mode="record"
+mode="score"
 # =========================
 # 运行 Python 脚本
 # =========================

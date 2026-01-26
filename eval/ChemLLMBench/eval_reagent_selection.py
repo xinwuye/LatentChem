@@ -22,6 +22,7 @@ topk_dict = {
 
 def eval_topk(ranked_list, pred, topk = 1):
     top_list = ranked_list[:topk]
+    print(type(ranked_list))
     top_list = [try_canonicalize_smiles(x) for x in top_list]
     pred = try_canonicalize_smiles(pred)
     if pred is None: return False
@@ -32,7 +33,7 @@ def eval_reagent_selection_from_list(pred_list, gt_list, task, top_k, total_leng
     for i in range(len(pred_list)):
         pred = pred_list[i]
         gt = gt_list[i]
-        if eval_topk(gt, pred, top_k):
+        if eval_topk(eval(gt), pred, top_k):
             correct_num += 1
             
     return {
