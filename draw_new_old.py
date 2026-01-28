@@ -2,20 +2,7 @@ import os
 import re
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib import rcParams
-import scienceplots
-plt.style.use(['science','no-latex','ieee'])
-# plt.rcParams["text.usetex"] = False
-# plt.style.use('science')
-rcParams['axes.prop_cycle'] = plt.cycler(color=[
-    '#9eaad1',  # blue
-    '#f59790',  # orange
-    '#dacfe5',  # green
-    '#f5dbb6',  # red
-    '#cde2e8',
-    '#c8d4e9'
-    
-])
+
 
 def parse_result_txt(path):
     """
@@ -32,7 +19,6 @@ def parse_result_txt(path):
     if df.shape[1] < 5:
         print(f"  ⚠ file has <5 cols: {path}")
         return pd.DataFrame()
-    df.columns = [c.lower() for c in df.columns]
 
     cols = df.columns.tolist()
     file_col = cols[0]
@@ -101,18 +87,6 @@ def plot_output_smiles(all_results, out_path):
     plt.figure(figsize=(8, 5))
 
     for name, df in all_results.items():
-        if name=="drd":
-            name="DRD2"
-        elif name=="gsk":
-            name="GSK3B"
-        elif name=="jnk":   
-            name="JNK3"
-        elif name=="logp":
-            name="LogP"
-        elif name=="qed":
-            name="QED"
-        elif name=="solubility":
-            name="Solubility"
         plt.errorbar(
             df["layer"],
             df["vs_answer_spearman"],
@@ -123,13 +97,13 @@ def plot_output_smiles(all_results, out_path):
             label=name,
         )
 
-    plt.xlabel("Latent Thinking Step",fontsize=13)
-    plt.ylabel("Output SMILES Structural Info. (Spearman Corr.)",fontsize=13)
-    # plt.title("Output SMILES Structural Info. (Spearman Corr.)")
-    plt.legend(fontsize=12)
+    plt.xlabel("Layer")
+    plt.ylabel("Spearman Correlation")
+    plt.title("Output SMILES Similarity vs Layer")
+    plt.legend(fontsize=8)
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(out_path.replace(".png", ".pdf"))
+    plt.savefig(out_path, dpi=300)
     plt.close()
 
 
@@ -139,19 +113,6 @@ def plot_input_smiles(all_results, out_path):
     plt.figure(figsize=(8, 5))
 
     for name, df in all_results.items():
-
-        if name=="drd":
-            name="DRD-2"
-        elif name=="gsk":
-            name="GSK-3β"
-        elif name=="jnk":   
-            name="JNK"
-        elif name=="logp":
-            name="LogP"
-        elif name=="qed":
-            name="QED"
-        elif name=="solubility":
-            name="Solubility"
         plt.errorbar(
             df["layer"],
             df["vs_logp_spearman"],
@@ -162,13 +123,13 @@ def plot_input_smiles(all_results, out_path):
             label=name,
         )
 
-    plt.xlabel("Latent Thinking Step",fontsize=13)
-    plt.ylabel("Input SMILES Structural Info. (Spearman Corr.)",fontsize=13)
-    # plt.title("Input SMILES Structural Info. (Spearman Corr.)")
-    plt.legend(fontsize=12)
+    plt.xlabel("Layer")
+    plt.ylabel("Spearman Correlation")
+    plt.title("Input SMILES Similarity vs Layer")
+    plt.legend(fontsize=8)
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(out_path.replace(".png", ".pdf"))
+    plt.savefig(out_path, dpi=300)
     plt.close()
 
 
@@ -190,4 +151,4 @@ if __name__ == "__main__":
         os.path.join(ROOT_DIR, "all_input_smiles_vs_layer.png")
     )
 
-    print("✅ Done. Two figures saved.") 
+    print("✅ Done. Two figures saved.")

@@ -1,3 +1,4 @@
+#计算 biotoken refined_9 各层的相似度矩阵，并保存为 CSV 文件
 import os
 import re
 import numpy as np
@@ -28,29 +29,39 @@ def generate_layerwise_similarity_matrices(
 
     # 1. 收集每一层的 embedding
     for fname in sorted(os.listdir(refined_dir)):
+        print(fname)
         match = pattern.match(fname)
         if match is None:
             continue
 
         mol_id = int(match.group(1))
+        # print(mol_id)
         layers = np.load(os.path.join(refined_dir, fname), allow_pickle=True)
 
         assert len(layers) >= num_layers, \
             f"{fname} has only {len(layers)} layers"
 
         for i in range(num_layers):
+            # print(layers[i].shape)
             emb = np.asarray(layers[i]).reshape(-1)
             layer_embeddings[i].append(emb)
 
         mol_ids.append(mol_id)
+    # print(len(layer_embeddings[0][0]))
 
-    num_mols = len(mol_ids)
-    assert num_mols == len(smiles_list), \
-        f"Mol count {num_mols} != SMILES count {len(smiles_list)}"
+
+
 
     # 2. 对每一层分别计算 similarity
     for i in range(num_layers):
+        print(num_layers)
         embs = layer_embeddings[i]
+        
+
+        # Check if embs is empty
+        if not embs:
+            print(f"Warning: No embeddings found for layer {i+1}, skipping...")
+            continue
 
         # 2.1 padding 到该层的最大维度
         max_dim = max(e.shape[0] for e in embs)

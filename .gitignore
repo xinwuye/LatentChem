@@ -12,7 +12,7 @@ result/
 # 数据集 (Datasets)
 ChemCotDataset/
 data/
-
+refine_corrected/
 # 训练输出结果 (Training Outputs)
 code_train_sft/qwen3_mol_sft_lora_results*
 code_train_sft/merged_model/
