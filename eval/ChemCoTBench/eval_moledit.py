@@ -5,7 +5,7 @@ import os
 from rdkit import Chem
 from rdkit.Chem import AllChem, Descriptors
 from rdkit import DataStructs
-from rdkit.Chem import Draw
+# from rdkit.Chem import Draw
 from rdkit.Chem.Fingerprints import FingerprintMols
 import logging
 

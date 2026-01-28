@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 answer_pattern = re.compile(r'<answer\s*>(.*?)</answer\s*>', flags=re.S)
 
-tokenizer = AutoTokenizer.from_pretrained("../../../Bio-LatentCOT/models/Qwen3-8B-Base")
+tokenizer = AutoTokenizer.from_pretrained("/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/Qwen3-8B-Base")
 
 class BaseTaskEvaluator(ABC):
     def __init__(self, logger: logging.Logger = None):
