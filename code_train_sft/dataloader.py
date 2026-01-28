@@ -11,6 +11,16 @@ import glob
 from datasets import load_dataset
 from transformers import AutoTokenizer
 from config import ModelConfig
+import re
+
+# text = '''
+# "query": "You are a chemical assistent, Optimize the Source Molecule to improve the DRD2 property
+# Source Molecule: CN1CCCN(CCn2ccc3ccc(C(N)=O)cc32)CC1."
+# '''
+
+
+
+
 
 # --------------------------------
 # Load tokenizer (Qwen decoder-only LM)
@@ -199,6 +209,12 @@ def extract_fields(example, is_eval: bool = False):
 
     # 如果是 eval 模式，将这些监督/中间字段设为 None
     if is_eval:
+        print(query)
+        if input_smiles == []:
+            
+            pattern_new = r"Source Molecule:\s*([BCNOFPSIKbcnops0-9@+\-\[\]\(\)=#$\\/%.]+)"
+            match = re.search(pattern_new, query)
+            input_smiles = [[match.group(1) if match else None]]
         return {
             "query": query,
             "input_smiles": input_smiles or [""],
@@ -253,6 +269,10 @@ def coconut_tokenize(
         prompt_ids = tokenizer.encode(f"{prompt}\n\n", add_special_tokens=False)
         input_ids = prompt_ids[:max_len]
         attention_mask = [1] * len(input_ids)
+        pattern_new = r"Source Molecule:\s*([BCNOFPSIKbcnops0-9@+\-\[\]\(\)=#$\\/%.]+)"
+        match = re.search(pattern_new, prompt)
+        smiles = [[match.group(1) if match else None]]
+        
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -439,6 +459,7 @@ def load_data(
             fn_kwargs={"include_cot": include_cot, "max_len": max_len, "is_eval": eval_mode},
                 remove_columns=["query", "input_smiles", "label", "cot", "cot_steps"]
         )
+        
     
     elif is_coconut:
         dataset = dataset.map(
@@ -519,7 +540,7 @@ if __name__ == "__main__":
     # ds_train = load_data(DATA_ROOT, include_cot=True, is_coconut=False, eval_mode=False)
     # print(f"Train samples example: {ds_train[0]}")
 
-    EVAL_DATA = '../data/ChemCoTBench'
+    EVAL_DATA = '/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemCoTBench/chemcotbench'
     # 示例：eval 集合加载（label/cot/cot_steps 为 None，tokenize 时不会产生 labels）
-    ds_eval = load_data(EVAL_DATA, include_cot=False, is_coconut=False, eval_mode=True, exclude_tasks=['rcr', 'mechsel'])
-    print(f"Eval samples example: {ds_eval[0]}")
+    dataset = load_data(EVAL_DATA, include_cot=False, is_coconut=False, eval_mode=True, exclude_tasks=['drd', 'jnk', 'logp', 'qed', 'solubility'])
+    print(f"Eval samples example: {dataset[0]}")

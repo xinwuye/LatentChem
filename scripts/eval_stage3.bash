@@ -4,13 +4,14 @@ set -euo pipefail
 # exp
 # =========================
 
-EXP_NAME=""
-CKPT_DIR=""
-TEMPERATURE=0.7
+EXP_NAME="124-taskthinker-bioupdater-logp"
+CKPT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/124-taskthinker-bioupdater/stage4"
+DATASET_NAME=ChemCoTBench/chemcotbench
+TEMPERATURE=1.5
 IS_BOTH_LATENT=false
 IS_BIOTHINKER=false
-IS_TASKTHINKER=false
-IS_BIOUPDATER=false
+IS_TASKTHINKER=true
+IS_BIOUPDATER=true
 IS_BIOTHINKER_MULTI=false
 TASKTHINKER_TYPE="mlp"
 IS_TASKTHINKER_MULTI=false
@@ -186,14 +187,14 @@ if [[ -z "${EXP_NAME}" || -z "${CKPT_DIR}" ]]; then
   exit 1
 fi
 
-DATASET_NAME=ChemCoTBench
+
 INCLUDE_TASKS=""
-CUDA_DEVICES=0,1
+CUDA_DEVICES=1
 
 # =========================
 # inference config
 # =========================
-BATCH_SIZE=4
+BATCH_SIZE=16
 NUM_RETURN_SEQUENCES=1
 MAX_NEW_TOKENS=2048
 TOP_P=0.9
@@ -214,7 +215,7 @@ SCRIPT_PATH="code_train_sft/inference.py"
 OUTPUT_DIR="outputs/${EXP_NAME}"
 LORA_PATH="${CKPT_DIR}/lora_weights"
 PROJECTOR_PATH="${CKPT_DIR}/mm_projector.pt"
-DATA_PATH="data/${DATASET_NAME}"
+DATA_PATH="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemCoTBench/chemcotbench"
 
 PYTHON_BIN="python"
 

@@ -48,7 +48,9 @@ def load_test_data(test_data_path, include_tasks, max_len=None, pure_text=False)
 
     if "ChemCoTBench" in test_data_path:
         # add, delete, sub should be tested in moledit, where include_tasks is set explicitly and exclude_tasks is ignored
-        dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=['add', 'delete', 'sub', 'rcr', 'mechsel'], max_len=max_len, pure_text=pure_text)
+        dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=['gsk', 'drd', 'jnk', 'qed', 'solubility'], max_len=max_len, pure_text=pure_text)
+
+        # dataset = load_data(EVAL_DATA, include_cot=False, is_coconut=False, eval_mode=True, exclude_tasks=['drd', 'jnk', 'logp', 'qed', 'solubility'])
         logger.info(f"Loaded tokenized eval dataset ChemCoTBench from dir: {len(dataset)} examples")
     elif "ChemCoTDataset" in test_data_path:
         dataset = load_data(test_data_path, include_cot=False, is_coconut=False, eval_mode=True, include_tasks=include_tasks, exclude_tasks=['rcr'], max_len=max_len, pure_text=pure_text)

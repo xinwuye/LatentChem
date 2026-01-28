@@ -16,7 +16,35 @@ from smi_ted_light.loadnew import load_smi_ted
 import torch.nn.functional as F
 from transformers.generation.utils import GenerationConfig
 from typing import Optional, List
+import torch
+import torch.nn as nn
+import math
+from dataclasses import dataclass
+from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PretrainedConfig
+from transformers.modeling_outputs import CausalLMOutputWithPast
+import sys
+import os
+from config import ModelConfig
+from filelock import FileLock
+import numpy as np
+# 动态添加路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 
+from smi_ted_light.loadnew import load_smi_ted
+import torch.nn.functional as F
+from transformers.generation.utils import GenerationConfig
+from typing import Optional, List
+# smiles_save_path="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refined/gsk/smiles.txt"
+# save_results_path="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refined/gsk/stage3_latent_gsk.json"
+save_results_path_refined="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refined/logp"
+counter = 0  # 全局变量
+
+def next_sample_id():
+    global counter
+    counter += 1
+    return f"{counter:06d}"
+import json
 
 @dataclass
 class BioLatentCausalLMOutputWithPast(CausalLMOutputWithPast):
@@ -789,6 +817,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         增强版前向传播：支持分子证据精炼与逆向干扰
         """
         smiles_list = kwargs.pop("smiles", None)
+        print(f"smiles_list: {smiles_list}")
         do_perturb = kwargs.pop("do_perturb", False) # 是否执行逆向干扰 (Counterfactual perturbation)
         use_coconut = bool(kwargs.pop("is_coconut", self.is_coconut))
         use_both_latent = bool(kwargs.pop("is_both_latent", self.is_both_latent))
@@ -816,6 +845,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
             raise ValueError("必须提供smiles参数")
 
         B = len(smiles_list)
+        print(B,smiles_list)
         device = self.model.device
 
         # =========================================================
@@ -1327,6 +1357,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
 
         This is used by vLLM generation paths that accept `prompt_embeds`.
         """
+        
         device = input_ids.device
         B = input_ids.size(0)
         use_both_latent = bool(self.is_both_latent)
@@ -1574,6 +1605,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
             latent_mask_ends = []
             task_latent_counts = []
             for b in range(B):
+                sample_id_1 = next_sample_id()
                 diff = diffs[b]
                 seq = prompt_embeds[b, diff:]  # [L_b, d]
                 if seq.size(0) == 0:
@@ -1586,8 +1618,10 @@ class Qwen3MoleculeLLM(PreTrainedModel):
                 latent_state_hist = []
                 bio_positions = bio_positions_list[b]
                 bioupdater_gate_cache = None
+                
 
                 ended = False
+                refined_list=[]
                 for current_latent_step in range(int(self.task_latent_max_steps)):
                     full_seq = torch.cat([base_prefix, latent_block], dim=1)
                     full_mask = torch.ones(1, full_seq.size(1), device=device, dtype=torch.long)
@@ -1652,14 +1686,46 @@ class Qwen3MoleculeLLM(PreTrainedModel):
                             refined = refined * bioupdater_gate_cache + batched_bio * (1.0 - bioupdater_gate_cache)
                         else:
                             refined = self.bio_updater(batched_bio, batched_lat)
+                        if current_latent_step==0:  #添加开始的变量
+                            begin_base_prefix=base_prefix[:, bio_positions].float().cpu().numpy().astype(np.float16)
+                        #添加每一层refined的变量
+                        refined_list.append(refined.float().cpu().numpy().astype(np.float16))
                         base_prefix[:, bio_positions] = refined.to(dtype=base_prefix.dtype)
+                    smiles_save_path = save_results_path_refined + "/smiles.txt"
+
+                    # 确保输出目录存在
+                    os.makedirs(os.path.dirname(os.path.abspath(smiles_save_path)), exist_ok=True)
 
                     new_latent = latent_state.to(dtype=self.model.dtype)
                     new_latent = self._taskthinker_with_gating(new_latent)
                     latent_block = torch.cat([latent_block, new_latent], dim=1)
+                print(smiles_list)
+                with open(smiles_save_path, "a", encoding="utf-8") as f:
+                    f.write(smiles_list[b][0] + "\n")
+                np.save(f"{save_results_path_refined}/{sample_id_1}_begin.npy", begin_base_prefix)
+                np.save(f"{save_results_path_refined}/{sample_id_1}_refined_{current_latent_step}.npy", refined_list)
 
                 if not ended:
                     latent_block = torch.cat([latent_block, end_latent_emb], dim=1)
+                latent_block_cat = latent_block[:, 1:-1, :]   
+                save_results_path=save_results_path_refined+"/stage3_latent_logp.json"
+
+
+                if not os.path.exists(save_results_path):
+                    open(save_results_path, 'w').close()
+
+                save_data = {
+                    'smiles': smiles_list[b],
+                    'latent_block': latent_block_cat.float().cpu().numpy().tolist()
+                }
+                # print(save_data)
+
+                # 使用文件锁确保线程/进程安全
+                lock = FileLock(save_results_path + ".lock")
+                with lock:
+                    with open(save_results_path, "a", encoding="utf-8") as f:
+                        json.dump(save_data, f, ensure_ascii=False)
+                        f.write("\n")  # 每条记录一行
 
                 n_task_latents = max(int(latent_block.size(1)) - 2, 0)
                 task_latent_counts.append(n_task_latents)
