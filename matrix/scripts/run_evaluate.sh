@@ -13,7 +13,7 @@ SCRIPTS_DIR="$BASE_DIR/matrix"
 INPUT_FOLDER="$BASE_DIR/matrix/result/biotoken_${TASK}"
 OUTPUT_FILE="$BASE_DIR/matrix/result/spearman_${TASK}_results.txt"
 PYTHON_SCRIPT="caculate_spearman_batch.py"
-ANSWER_FILE="$BASE_DIR/outputs/124-taskthinker-bioupdater_matrix_${TASK}/results/inference_results_*.json"
+ANSWER_FILE="$BASE_DIR/outputs/124-taskthinker-bioupdater-${TASK}/results/inference_results_*.json"
 MATCHED_FILES=$(ls $ANSWER_FILE 2>/dev/null)
 if [ -z "$MATCHED_FILES" ]; then
     echo "❌ 错误: 未找到匹配的答案文件: $ANSWER_FILE"
@@ -80,7 +80,7 @@ echo "✅ 完成！输出答案相似度矩阵已保存至: $ANSWER_SIM_MATRIX_F
 
 # === 步骤 3: 计算平均值并保存 ===
 echo "🚀 步骤 3: 计算平均值并保存..."
-LOGP_DIR="$BASE_DIR/refined/${TASK}"
+LOGP_DIR="$BASE_DIR/refine_corrected/${TASK}"
 SAVE_PATH="$BASE_DIR/matrix/result/biotoken_${TASK}"
 
 python3 "$SCRIPTS_DIR/biotoken_matrix_mean.py" \
