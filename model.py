@@ -3,7 +3,7 @@ import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import sys
-sys.path.append('/zengdaojian/zhangjia/BioLatent/smi-ted/smi-ted/inference')
+sys.path.append('/BioLatent/smi-ted/smi-ted/inference')
 from smi_ted_light.load import load_smi_ted
 import pandas as pd
 import numpy as np
@@ -37,11 +37,11 @@ def calculate_tanimoto_similarities(fps1, fps2):
 
 
 # model_smi_ted = load_smi_ted(
-#     folder='/zengdaojian/zhangjia/BioLatent/smi-ted/smi-ted/inference/smi_ted_light',
-#     ckpt_filename='/zengdaojian/zhangjia/BioLatent/smi-ted/smi-ted-Light_40.pt'
+#     folder='/BioLatent/smi-ted/smi-ted/inference/smi_ted_light',
+#     ckpt_filename='/BioLatent/smi-ted/smi-ted-Light_40.pt'
 # )
 
-# df_moses = pd.read_csv("/zengdaojian/zhangjia/BioLatent/smi-ted/smi-ted/notebooks/data/moses_test.csv", nrows=1000)
+# df_moses = pd.read_csv("/BioLatent/smi-ted/smi-ted/notebooks/data/moses_test.csv", nrows=1000)
 
 # with torch.no_grad():
 #     # print(type(df_moses['SMILES']))
@@ -90,7 +90,7 @@ class QueryAttentionProjector(nn.Module):
 # ============================
 class Qwen3MoleculeLLM(nn.Module):
     def __init__(self, 
-                 qwen_model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B",
+                 qwen_model_name="/BioLatent/Qwen4B",
                  d_mol=202*768):
         super().__init__()
 
@@ -113,8 +113,8 @@ class Qwen3MoleculeLLM(nn.Module):
 
         # ---- molecule encoder and projector ----
         self.mol_encoder = load_smi_ted(
-                folder='/zengdaojian/zhangjia/BioLatent/smi-ted/smi-ted/inference/smi_ted_light',
-                ckpt_filename='/zengdaojian/zhangjia/BioLatent/smi-ted/smi-ted-Light_40.pt'
+                folder='/BioLatent/smi-ted/smi-ted/inference/smi_ted_light',
+                ckpt_filename='/BioLatent/smi-ted/smi-ted-Light_40.pt'
             )
         self.projector = QueryAttentionProjector()
 
@@ -203,7 +203,7 @@ if __name__ == "__main__":
     # L_smiles = 20
     # L_text = 40
     model = Qwen3MoleculeLLM(
-    qwen_model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B",
+    qwen_model_name="/BioLatent/Qwen4B",
     d_mol=202*768
     ).cuda()
     tokenizer = model.tokenizer

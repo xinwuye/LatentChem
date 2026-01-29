@@ -564,8 +564,8 @@ def load_inference_data(data_path, exclude_tasks=None):
 
 def main():
     parser = argparse.ArgumentParser(description='Preprocess ChemLLMBench data')
-    parser.add_argument('--input_dir', type=str, required=False, help='Input directory containing task subdirectories',default="/zengdaojian/zhangjia/BioLatent/ChemLLMBench/data")
-    parser.add_argument('--output_dir', type=str, required=False, help='Output directory to save processed data',default="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench")
+    parser.add_argument('--input_dir', type=str, required=False, help='Input directory containing task subdirectories',default="/BioLatent/ChemLLMBench/data")
+    parser.add_argument('--output_dir', type=str, required=False, help='Output directory to save processed data',default="/BioLatent/Bio-LatentCOT/data/ChemLLMBench")
     parser.add_argument('--load_inference', action='store_true', help='Load data for inference instead of preprocessing')
 
     args = parser.parse_args()

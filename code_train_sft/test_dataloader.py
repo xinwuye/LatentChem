@@ -8,7 +8,7 @@ from dataloader import load_data
 from config import ModelConfig
 
 # Test with a small subset
-DATA_PATH = '/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench'
+DATA_PATH = '/BioLatent/Bio-LatentCOT/data/ChemLLMBench'
 
 print("=" * 60)
 print("Testing Dataloader Pipeline")

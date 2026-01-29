@@ -81,7 +81,7 @@ def train_sft(model, tokenizer, train_dataset, epochs=1, batch_size=2, lr=1e-4, 
 # ===========================
 # 3. 初始化模型
 # ===========================
-model = Qwen3MoleculeLLM(qwen_model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B")
+model = Qwen3MoleculeLLM(qwen_model_name="/BioLatent/Qwen4B")
 tokenizer = model.tokenizer
 tokenizer.pad_token = tokenizer.eos_token
 
@@ -94,7 +94,7 @@ except FileNotFoundError:
 # ===========================
 # 4. 构建训练数据
 # ===========================
-train_dataset = load_data("/zengdaojian/zhangjia/BioLatent/ChemCotDataset/chemcotbench-cot")
+train_dataset = load_data("/BioLatent/ChemCotDataset/chemcotbench-cot")
 
 # ===========================
 # 5. 训练

@@ -6,9 +6,9 @@ set -e
 ############################
 BASE_DIR=$(pwd)
 
-MODEL_OUTPUT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/Mol-Instructions/stage2_with_cot/mnt/afs/L202500070/Bio-LatentCOT/code_train_sft/outputs/stage2_with_cot"
-DATA_PATH="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench"          # 测试 / 验证数据目录
-# merged_model_path="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/Mol-Instructions/stage2_with_cot/mnt/afs/L202500070/Bio-LatentCOT/code_train_sft/outputs/stage2_with_cot"
+MODEL_OUTPUT_DIR="/BioLatent/Bio-LatentCOT/eval/Mol-Instructions/stage2_with_cot/mnt/afs/L202500070/Bio-LatentCOT/code_train_sft/outputs/stage2_with_cot"
+DATA_PATH="/BioLatent/Bio-LatentCOT/data/ChemLLMBench"          # 测试 / 验证数据目录
+# merged_model_path="/BioLatent/Bio-LatentCOT/eval/Mol-Instructions/stage2_with_cot/mnt/afs/L202500070/Bio-LatentCOT/code_train_sft/outputs/stage2_with_cot"
 
 RESULT_DIR="${MODEL_OUTPUT_DIR}/inference_vllm"
 mkdir -p "${RESULT_DIR}"
@@ -58,7 +58,7 @@ export TOKENIZERS_PARALLELISM=false
 ############################
 # 运行推理
 ############################
-python /zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/code_train_sft/train_sft_stage2.py \
+python /BioLatent/Bio-LatentCOT/code_train_sft/train_sft_stage2.py \
   --mode vllm \
   --output_dir "${MODEL_OUTPUT_DIR}" \
   --data_path "${DATA_PATH}" \

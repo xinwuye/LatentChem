@@ -62,4 +62,4 @@ def build_grouped_save_data(
         with open(task_path, 'w') as f:
             json.dump(group, f, ensure_ascii=False, indent=4)
             
-build_grouped_save_data("/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/result/stage2_with_cot.json","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench_result","mytest_new")
+build_grouped_save_data("/BioLatent/Bio-LatentCOT/result/stage2_with_cot.json","/BioLatent/Bio-LatentCOT/data/ChemLLMBench_result","mytest_new")

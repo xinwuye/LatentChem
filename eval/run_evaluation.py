@@ -76,9 +76,9 @@ def patch_evaluation_functions():
     ChemLLMBench.eval_yield_prediction.evaluate_yield_prediction_score = patched_evaluate_yield_prediction_score
 
 # Hardcoded paths for your specific evaluation
-result_path = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/Mol-Instructions/stage2_with_cot/mnt/afs/L202500070/Bio-LatentCOT/code_train_sft/outputs/stage2_with_cot/inference/results_20260110-050429_p0.json"
+result_path = "/BioLatent/Bio-LatentCOT/eval/Mol-Instructions/stage2_with_cot/mnt/afs/L202500070/Bio-LatentCOT/code_train_sft/outputs/stage2_with_cot/inference/results_20260110-050429_p0.json"
 log_name = "results_20260110-050429_p0"
-dataset_path = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench/chemllmbench"
+dataset_path = "/BioLatent/Bio-LatentCOT/data/ChemLLMBench/chemllmbench"
 
 current_file = os.path.abspath(__file__)
 current_dir = os.path.dirname(current_file)

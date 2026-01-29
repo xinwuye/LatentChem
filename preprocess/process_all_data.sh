@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Shell script to process all ChemLLMBench data
-# This script processes all data from /zengdaojian/zhangjia/BioLatent/ChemLLMBench/data
-# and outputs the processed data to /zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench
+# This script processes all data from /BioLatent/ChemLLMBench/data
+# and outputs the processed data to /BioLatent/Bio-LatentCOT/data/ChemLLMBench
 # with subdirectories for each task type
 
 set -e  # Exit on any error
@@ -10,8 +10,8 @@ set -e  # Exit on any error
 echo "Starting preprocessing of ChemLLMBench data..."
 
 # Define input and output directories
-INPUT_DIR="/zengdaojian/zhangjia/BioLatent/ChemLLMBench/data"
-OUTPUT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench"
+INPUT_DIR="/BioLatent/ChemLLMBench/data"
+OUTPUT_DIR="/BioLatent/Bio-LatentCOT/data/ChemLLMBench"
 
 # Create output directory if it doesn't exist
 mkdir -p "$OUTPUT_DIR"
@@ -27,7 +27,7 @@ fi
 
 # Run the preprocessing script
 echo "Running preprocessing script..."
-python /zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/code_train_sft/preprocess_chemllm.py --input_dir "$INPUT_DIR" --output_dir "$OUTPUT_DIR"
+python /BioLatent/Bio-LatentCOT/code_train_sft/preprocess_chemllm.py --input_dir "$INPUT_DIR" --output_dir "$OUTPUT_DIR"
 
 # Check if the script ran successfully
 if [ $? -eq 0 ]; then

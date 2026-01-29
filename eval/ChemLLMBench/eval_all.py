@@ -1,6 +1,6 @@
 import os
 import sys
-# sys.path.append("/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval")
+# sys.path.append("/BioLatent/Bio-LatentCOT/eval")
 from ChemLLMBench.eval_molecule_captioning import evaluate_molecule_captioning_score
 from ChemLLMBench.eval_molecule_design import evaluate_molecule_design_score
 from ChemLLMBench.eval_name_prediction import evaluate_name_prediction_score
@@ -21,4 +21,4 @@ def eval_all_ChemLLMBench(log_name, dataset_path, logs_dir, results_dir):
     evaluate_yield_prediction_score(log_name, dataset_path, logs_dir, results_dir)
     
     
-eval_all_ChemLLMBench("mytest","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench/chemllmbench","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench_result","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/results")
+eval_all_ChemLLMBench("mytest","/BioLatent/Bio-LatentCOT/data/ChemLLMBench/chemllmbench","/BioLatent/Bio-LatentCOT/data/ChemLLMBench_result","/BioLatent/Bio-LatentCOT/eval/results")

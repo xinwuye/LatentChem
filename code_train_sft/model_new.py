@@ -695,7 +695,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
 if __name__ == "__main__":
     # 初始化模型
     model = Qwen3MoleculeLLM(
-        qwen_model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B",
+        qwen_model_name="/BioLatent/Qwen4B",
     ).cuda()
     
     tokenizer = model.tokenizer
