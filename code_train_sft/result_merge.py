@@ -63,7 +63,7 @@ def main():
     if len(sys.argv) > 1:
         results_dir = sys.argv[1]
     else:
-        results_dir = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/outputs/exp_chemllmbench_stage3_1_5_no/results"
+        results_dir = "/BioLatent/Bio-LatentCOT/outputs/exp_chemllmbench_stage3_1_5_no/results"
 
     # Generate output filename based on input directory
     parent_dir = os.path.dirname(results_dir.rstrip('/'))

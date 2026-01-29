@@ -129,7 +129,7 @@ def plot_output_smiles(all_results, out_path):
     plt.legend(fontsize=12)
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(out_path.replace(".png", ".pdf"))
+    plt.savefig(out_path.replace(".png", ".svg"))
     plt.close()
 
 
@@ -168,13 +168,13 @@ def plot_input_smiles(all_results, out_path):
     plt.legend(fontsize=12)
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(out_path.replace(".png", ".pdf"))
+    plt.savefig(out_path.replace(".png", ".svg"))
     plt.close()
 
 
 
 if __name__ == "__main__":
-    ROOT_DIR = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/matrix/result"
+    ROOT_DIR = "/BioLatent/Bio-LatentCOT/matrix/result"
 
     all_results = collect_all_results(ROOT_DIR)
     if not all_results:

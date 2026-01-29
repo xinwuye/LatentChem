@@ -17,9 +17,9 @@ from smi_ted_light.loadnew import load_smi_ted
 import torch.nn.functional as F
 from transformers.generation.utils import GenerationConfig
 from typing import Optional, List
-# smiles_save_path="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refined/logp/smiles.txt"
-# save_results_path="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refined/logp/stage3_latent_logp.json"
-save_results_path_refined="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refined/drd"
+# smiles_save_path="/BioLatent/Bio-LatentCOT/refined/logp/smiles.txt"
+# save_results_path="/BioLatent/Bio-LatentCOT/refined/logp/stage3_latent_logp.json"
+save_results_path_refined="/BioLatent/Bio-LatentCOT/refined/drd"
 counter = 0  # 全局变量
 
 def next_sample_id():
@@ -1802,7 +1802,7 @@ if __name__ == "__main__":
         'num_heads': 2
     }
     model = Qwen3MoleculeLLM(
-        qwen_model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B",
+        qwen_model_name="/BioLatent/Qwen4B",
         mol_config=mol_config
     ).cuda()
     print("Stage 3 Model Initialized Successfully!")

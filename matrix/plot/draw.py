@@ -123,5 +123,5 @@ def process_all_results(root_dir):
 
 if __name__ == "__main__":
     # ← 改为你的根目录（脚本会递归查找所有 *result.txt）
-    ROOT_DIR = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/matrix/result"
+    ROOT_DIR = "/BioLatent/Bio-LatentCOT/matrix/result"
     process_all_results(ROOT_DIR)

@@ -1,7 +1,7 @@
 import os
 import re
 
-logp_dir = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refined/solubility"
+logp_dir = "/BioLatent/Bio-LatentCOT/refined/solubility"
 
 keep_pattern = re.compile(r"\d+_refined_9\.npy$")
 delete_pattern = re.compile(r"\d+_refined_\d+\.npy$")

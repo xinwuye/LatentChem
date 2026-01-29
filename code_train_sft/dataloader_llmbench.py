@@ -728,7 +728,7 @@ if __name__ == "__main__":
     # ds_train = load_data(DATA_ROOT, include_cot=True, is_coconut=False, eval_mode=False)
     # print(f"Train samples example: {ds_train[0]}")
 
-    EVAL_DATA = '/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench/chemllmbench'
+    EVAL_DATA = '/BioLatent/Bio-LatentCOT/data/ChemLLMBench/chemllmbench'
     # 示例：eval 集合加载（label/cot/cot_steps 为 None，tokenize 时不会产生 labels）,exclude_tasks=['molecule_captioning','molecule_design','name_prediction','reaction_prediction','retro']
     ds_eval = load_data(EVAL_DATA, include_cot=False, is_coconut=False, exclude_tasks=['molecule_captioning','molecule_design','name_prediction','reaction_prediction','retro'],eval_mode=True)#,exclude_tasks=['molecule_captioning','molecule_design','name_prediction','reaction_prediction','retro'],
     print(f"Eval samples example: {ds_eval[0]}")

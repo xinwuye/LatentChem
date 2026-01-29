@@ -25,7 +25,7 @@ echo "  Model B: $MODEL_B"
 echo "----------------------------------------"
 
 # Change to the Bio-LatentCOT directory to ensure proper imports
-cd /zengdaojian/zhangjia/BioLatent/Bio-LatentCOT
+cd /BioLatent/Bio-LatentCOT
 
 # Run the Python script with the specified parameters
 python eval/query_wise/eval_querywise.py \
@@ -39,5 +39,5 @@ echo "----------------------------------------"
 echo "Script completed with exit code: $EXIT_CODE"
 
 exit $EXIT_CODE
-python /zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/query_wise/eval_querywise.py --root_dir /zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/records/molecule_design --model_A inference_result_0_7_test --model_B stage_4_inference_re
+python /BioLatent/Bio-LatentCOT/eval/query_wise/eval_querywise.py --root_dir /BioLatent/Bio-LatentCOT/eval/records/molecule_design --model_A inference_result_0_7_test --model_B stage_4_inference_re
 sult_0_7_no

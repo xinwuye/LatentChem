@@ -8,7 +8,7 @@ set -e  # 遇错即停
 
 # === 定义全局变量 ===
 TASK=${1:-"drd"}  # 默认任务类型为 "qed"
-BASE_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT"
+BASE_DIR="/BioLatent/Bio-LatentCOT"
 SCRIPTS_DIR="$BASE_DIR/matrix"
 INPUT_FOLDER="$BASE_DIR/matrix/result/biotoken_${TASK}"
 OUTPUT_FILE="$BASE_DIR/matrix/result/spearman_${TASK}_results.txt"

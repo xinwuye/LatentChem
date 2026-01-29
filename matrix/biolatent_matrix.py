@@ -8,7 +8,7 @@ import pandas as pd
 num=9
 # 读取 JSONL 文件（每行一个 JSON 对象）
 data = []
-with open('/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/sorted_data_logp.jsonl', 'r', encoding='utf-8') as f:
+with open('/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/sorted_data_logp.jsonl', 'r', encoding='utf-8') as f:
     for line in f:
         line = line.strip()
         if line:  # 跳过空行
@@ -53,6 +53,6 @@ print(similarity_matrix)
 
 # 保存到文件（CSV 格式）
 df = pd.DataFrame(similarity_matrix, index=smiles_list, columns=smiles_list)
-df.to_csv('/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/bio_latent_similarity_matrix_logp'+'mean'+'.csv')
+df.to_csv('/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/bio_latent_similarity_matrix_logp'+'mean'+'.csv')
 
 print("✅ 相似度矩阵已保存到 bio_latent_similarity_matrix_logp_mean.csv")

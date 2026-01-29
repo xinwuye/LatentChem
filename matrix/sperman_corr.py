@@ -37,8 +37,8 @@ def spearman_upper_triangle(mat1, mat2):
 if __name__ == "__main__":
     # 替换为你的实际文件路径
     for i in range(0,1):
-        csv_file_1 = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/molecular_similarity_matrix_lop_answer.csv"   # 例如 RDKit 指纹相似度
-        csv_file_2 = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/qwen3_smiles_similarity_string_lop.csv"   # 例如 Qwen3 embedding 相似度
+        csv_file_1 = "/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/molecular_similarity_matrix_lop_answer.csv"   # 例如 RDKit 指纹相似度
+        csv_file_2 = "/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/qwen3_smiles_similarity_string_lop.csv"   # 例如 Qwen3 embedding 相似度
 
         # 1. 读取两个矩阵
         df1 = load_similarity_matrix(csv_file_1)

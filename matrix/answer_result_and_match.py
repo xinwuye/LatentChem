@@ -50,7 +50,7 @@ def extract_final_target_molecule(text: str):
 
     return None
 
-path = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/outputs/124-taskthinker-bioupdater_matrix/results/124-taskthinker.json"
+path = "/BioLatent/Bio-LatentCOT/outputs/124-taskthinker-bioupdater_matrix/results/124-taskthinker.json"
 
 def load_concatenated_json(path):
     with open(path, "r") as f:

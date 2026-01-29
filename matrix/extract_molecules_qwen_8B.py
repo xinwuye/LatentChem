@@ -6,7 +6,7 @@ import pandas as pd
 from extract_molecules import extract_source_molecules
 import json
 # 1. 加载 tokenizer 和 base 模型（注意：必须是 base，不是 chat）
-model_name = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/Qwen3-8B-Base"  # 确保你有权访问此模型
+model_name = "/BioLatent/Bio-LatentCOT/models/Qwen3-8B-Base"  # 确保你有权访问此模型
 
 tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 model = AutoModel.from_pretrained(
@@ -19,7 +19,7 @@ model = AutoModel.from_pretrained(
 model.eval()  # 设置为评估模式
 
 # 2. 分子 SMILES 列表
-json_file_path = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemCoTBench/chemcotbench/mol_opt/logp.json"
+json_file_path = "/BioLatent/Bio-LatentCOT/data/ChemCoTBench/chemcotbench/mol_opt/logp.json"
 
 # Extract all source molecules
 smiles_list = extract_source_molecules(json_file_path)
@@ -72,6 +72,6 @@ df_sim = pd.DataFrame(
 )
 
 # 保存到 CSV
-df_sim.to_csv("/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/qwen3_smiles_similarity_string_lop.csv", float_format="%.4f")
+df_sim.to_csv("/BioLatent/Bio-LatentCOT/eval/silmilarity_matrix/qwen3_smiles_similarity_string_lop.csv", float_format="%.4f")
 print("相似度矩阵已保存到 qwen3_smiles_similarity_lop.csv")
 print(df_sim)

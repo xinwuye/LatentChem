@@ -1,5 +1,5 @@
-input_file = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refined/solubility/smiles.txt"
-output_file = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refined/solubility/smiles.txt"
+input_file = "/BioLatent/Bio-LatentCOT/refined/solubility/smiles.txt"
+output_file = "/BioLatent/Bio-LatentCOT/refined/solubility/smiles.txt"
 
 with open(input_file, 'r', encoding='utf-8') as f:
     lines = f.readlines()

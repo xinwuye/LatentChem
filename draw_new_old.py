@@ -135,7 +135,7 @@ def plot_input_smiles(all_results, out_path):
 
 
 if __name__ == "__main__":
-    ROOT_DIR = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/matrix/result"
+    ROOT_DIR = "/BioLatent/Bio-LatentCOT/matrix/result"
 
     all_results = collect_all_results(ROOT_DIR)
     if not all_results:

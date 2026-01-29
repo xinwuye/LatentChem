@@ -8,8 +8,8 @@
 #     exit 1
 # fi
 
-TOP_FOLDER="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refined"
-PYTHON_SCRIPT="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/matrix/matrix_plot.py"  # Python脚本文件名
+TOP_FOLDER="/BioLatent/Bio-LatentCOT/refined"
+PYTHON_SCRIPT="/BioLatent/Bio-LatentCOT/matrix/matrix_plot.py"  # Python脚本文件名
 
 # 遍历所有子文件夹
 find "$TOP_FOLDER" -type d | while read SUBFOLDER; do

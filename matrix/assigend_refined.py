@@ -4,7 +4,7 @@ import shutil
 import re
 
 # ===== 路径配置 =====
-src_dir = "/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refine_corrected/refined"  # 原始文件夹
+src_dir = "/BioLatent/Bio-LatentCOT/refine_corrected/refined"  # 原始文件夹
 dst_dirs = [
     "refined_drd",
     "refined_gsk",

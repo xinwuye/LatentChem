@@ -5,7 +5,7 @@ set -euo pipefail
 # =========================
 DATASET_NAME=ChemCoTBench/chemcotbench/mol_opt
 EXP_NAME="124-taskthinker-bioupdater_matrix_drd"
-CKPT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/models/124-taskthinker-bioupdater/stage4"
+CKPT_DIR="/BioLatent/Bio-LatentCOT/models/124-taskthinker-bioupdater/stage4"
 TEMPERATURE=0.7
 IS_BOTH_LATENT=false
 IS_BIOTHINKER=false

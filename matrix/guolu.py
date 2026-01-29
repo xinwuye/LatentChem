@@ -1,7 +1,7 @@
 import json
 
 # 读取原始 JSON 文件
-with open("/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/refine_corrected/stage3_inference.proc0.json", "r", encoding="utf-8") as f:
+with open("/BioLatent/Bio-LatentCOT/refine_corrected/stage3_inference.proc0.json", "r", encoding="utf-8") as f:
     data = json.load(f)
 
 # 过滤 test_results 中 task 不是 "qed" 的数据
