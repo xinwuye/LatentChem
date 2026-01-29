@@ -5,11 +5,16 @@ models/
 *.safetensors
 *.pth
 *.ckpt
-
+*.json
 # 数据集 (Datasets)
 ChemCotDataset/
 ChemCotDataset-old/
 data/
+matrix/
+new_latent/
+refine_corrected.tar.gz
+refine_corrected/
+refined/
 
 # 训练输出结果 (Training Outputs)
 code_train_sft/qwen3_mol_sft_lora_results*
