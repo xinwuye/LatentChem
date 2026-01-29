@@ -1,6 +1,6 @@
 import os
 import sys
-# sys.path.append("/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval")
+# sys.path.append("/BioLatent/Bio-LatentCOT/eval")
 from ChemLLMBench.eval_molecule_captioning import evaluate_molecule_captioning_score, record_molecule_captioning_results
 from ChemLLMBench.eval_molecule_design import evaluate_molecule_design_score, record_molecule_design_results
 from ChemLLMBench.eval_name_prediction import evaluate_name_prediction_score
@@ -28,6 +28,6 @@ def record_all_ChemLLMBench(log_name, dataset_path, logs_dir, results_dir):
     record_retro_results(log_name, dataset_path, logs_dir, results_dir)
     
 
-# eval_all_ChemLLMBench("mytest","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench/chemllmbench","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench_result","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/results")
+# eval_all_ChemLLMBench("mytest","/BioLatent/Bio-LatentCOT/data/ChemLLMBench/chemllmbench","/BioLatent/Bio-LatentCOT/data/ChemLLMBench_result","/BioLatent/Bio-LatentCOT/eval/results")
 
-# record_all_ChemLLMBench("mytest","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench/chemllmbench","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/data/ChemLLMBench_result","/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/records")
+# record_all_ChemLLMBench("mytest","/BioLatent/Bio-LatentCOT/data/ChemLLMBench/chemllmbench","/BioLatent/Bio-LatentCOT/data/ChemLLMBench_result","/BioLatent/Bio-LatentCOT/eval/records")

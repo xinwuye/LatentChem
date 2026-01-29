@@ -1828,7 +1828,7 @@ if __name__ == "__main__":
         'num_heads': 2
     }
     model = Qwen3MoleculeLLM(
-        qwen_model_name="/zengdaojian/zhangjia/BioLatent/Qwen4B",
+        qwen_model_name="/BioLatent/Qwen4B",
         mol_config=mol_config
     ).cuda()
     print("Stage 3 Model Initialized Successfully!")

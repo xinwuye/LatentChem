@@ -6,7 +6,7 @@ models/
 *.pth
 *.ckpt
 *.gz
-
+*.json
 # 数据集 (Datasets)
 ChemCotDataset/
 ChemCotDataset-old/
@@ -16,6 +16,7 @@ refined/
 models/
 outputs/
 new_latent/
+refine_corrected/
 # 训练输出结果 (Training Outputs)
 code_train_sft/qwen3_mol_sft_lora_results*
 code_train_sft/merged_model/

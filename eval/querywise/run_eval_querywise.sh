@@ -3,7 +3,7 @@
 # 用法: ./run_eval.sh /path/to/root_dir modelA modelB
 
 # 参数
-ROOT_DIR="/zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/records"
+ROOT_DIR="/BioLatent/Bio-LatentCOT/eval/records"
 MODEL_A="nocot"
 MODEL_B="nonlatent"
 
@@ -17,6 +17,6 @@ fi
 for task_dir in "$ROOT_DIR"/*/; do
     if [ -d "$task_dir" ]; then
         echo "Evaluating task in folder: $task_dir"
-        python3 /zengdaojian/zhangjia/BioLatent/Bio-LatentCOT/eval/querywise/eval_querywise.py --root_dir "$task_dir" --model_A "$MODEL_A" --model_B "$MODEL_B"
+        python3 /BioLatent/Bio-LatentCOT/eval/querywise/eval_querywise.py --root_dir "$task_dir" --model_A "$MODEL_A" --model_B "$MODEL_B"
     fi
 done
