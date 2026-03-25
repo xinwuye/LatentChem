@@ -26,7 +26,16 @@ done
 
 cd "${REPO_ROOT}"
 
-mapfile -t QWEN_INFO < <(python - "${QWEN_SIZE}" <<'PY'
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+else
+  echo "Neither python3 nor python is available on PATH" >&2
+  exit 1
+fi
+
+mapfile -t QWEN_INFO < <("${PYTHON_BIN}" - "${QWEN_SIZE}" <<'PY'
 import sys
 from code_train_sft.config import ModelConfig
 
