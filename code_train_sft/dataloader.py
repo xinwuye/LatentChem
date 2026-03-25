@@ -15,8 +15,8 @@ from config import ModelConfig
 # --------------------------------
 # Load tokenizer (Qwen decoder-only LM)
 # --------------------------------
-tokenizer = AutoTokenizer.from_pretrained(ModelConfig.DEFAULT_QWEN_PATH)
-tokenizer.pad_token = tokenizer.eos_token
+_tokenizer_model_path = ModelConfig.DEFAULT_QWEN_PATH
+_tokenizer = None
 
 # 🚨 Coconut 特殊标记
 COCONUT_TOKENS = {
@@ -26,12 +26,39 @@ COCONUT_TOKENS = {
     "mol_start": "<mol_start>",
     "mol_end": "<mol_end>"
 }
-# 确保所有特殊标记都添加到词表
-tokenizer.add_tokens(list(COCONUT_TOKENS.values()))
 
-LATENT_ID = tokenizer.convert_tokens_to_ids(COCONUT_TOKENS["latent"])
-START_LATENT_ID = tokenizer.convert_tokens_to_ids(COCONUT_TOKENS["start_latent"])
-END_LATENT_ID = tokenizer.convert_tokens_to_ids(COCONUT_TOKENS["end_latent"])
+
+def _build_tokenizer(model_path: str):
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.add_tokens(list(COCONUT_TOKENS.values()))
+    return tokenizer
+
+
+def get_tokenizer():
+    global _tokenizer
+    if _tokenizer is None:
+        _tokenizer = _build_tokenizer(_tokenizer_model_path)
+    return _tokenizer
+
+
+def set_tokenizer_model_path(model_path: str):
+    global _tokenizer_model_path, _tokenizer
+    if not isinstance(model_path, str) or not model_path.strip():
+        raise ValueError(f"Tokenizer model path must be a non-empty string, got: {model_path!r}")
+    normalized = os.path.abspath(model_path)
+    if normalized != _tokenizer_model_path:
+        _tokenizer_model_path = normalized
+        _tokenizer = None
+
+
+def get_coconut_token_ids():
+    tokenizer = get_tokenizer()
+    return {
+        "latent": tokenizer.convert_tokens_to_ids(COCONUT_TOKENS["latent"]),
+        "start_latent": tokenizer.convert_tokens_to_ids(COCONUT_TOKENS["start_latent"]),
+        "end_latent": tokenizer.convert_tokens_to_ids(COCONUT_TOKENS["end_latent"]),
+    }
 
 # 最大文本长度（prompt + answer），从配置中读取
 MAX_LEN = ModelConfig.MAX_TEXT_LEN
@@ -256,6 +283,11 @@ def coconut_tokenize(
     prompt = example.get("query", "")
     steps = example.get("cot_steps") or []
     label = example.get("label")
+    tokenizer = get_tokenizer()
+    token_ids = get_coconut_token_ids()
+    latent_id = token_ids["latent"]
+    start_latent_id = token_ids["start_latent"]
+    end_latent_id = token_ids["end_latent"]
 
     # Eval 模式：只 token 化 prompt
     if is_eval or (label is None and not steps):
@@ -277,7 +309,7 @@ def coconut_tokenize(
     
     # 2. Latent 部分拼接
     # 格式：<start_latent> + <latent> * N + <end_latent>
-    latent_ids = [START_LATENT_ID] + [LATENT_ID] * n_latent_tokens + [END_LATENT_ID]
+    latent_ids = [start_latent_id] + [latent_id] * n_latent_tokens + [end_latent_id]
     
     # 3. 剩余文本步骤 Tokenize
     remaining_steps_text = "\n\n".join(steps[n_skip_steps:])
@@ -322,6 +354,7 @@ def llm_tokenize(example, include_cot=True, max_len=ModelConfig.MAX_TEXT_LEN, is
     prompt = example.get("query", "")
     cot = example.get("cot") or ""
     label = example.get("label")
+    tokenizer = get_tokenizer()
 
     if is_eval or (label is None):
         # 仅 prompt

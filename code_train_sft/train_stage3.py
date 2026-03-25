@@ -18,7 +18,7 @@ import plotext as plt
 
 # 导入我们的自定义组件
 from model_stage3 import Qwen3MoleculeLLM
-from dataloader import load_data, COCONUT_TOKENS
+from dataloader import load_data, set_tokenizer_model_path
 from config import ModelConfig
 # from train_sft_stage2 import MultiModalDataCollator, MultiModalSFTTrainer, LoraTrainingMonitorCallback, TerminalPlotCallback
 import torch.nn.functional as F
@@ -27,6 +27,10 @@ import random
 # 设置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _resolve_qwen_model_path(qwen_size: str) -> str:
+    return ModelConfig.require_qwen_path(qwen_size)
 
 # 自定义回调函数，用于监控训练过程
 class LoraTrainingMonitorCallback(TrainerCallback):
@@ -384,6 +388,12 @@ logger = logging.getLogger(__name__)
 def train_stage3():
     parser = argparse.ArgumentParser(description="Stage 3 Training for Bio-LatentCOT")
     parser.add_argument("--data_path", type=str, default="/mnt/afs/L202500070/Bio-LatentCOT/ChemCotDataset/chemcotbench-cot")
+    parser.add_argument(
+        "--qwen_size",
+        type=str,
+        default=ModelConfig.DEFAULT_QWEN_SIZE,
+        help="Qwen backbone size. Allowed: 0.6b, 1.7b, 4b, 8b, 14b. Default: 8b.",
+    )
     parser.add_argument("--lora_path", type=str, default=None, help="Stage 2 LoRA weights (optional)")
     parser.add_argument("--projector_path", type=str, default=None, help="Unified projector + bio_updater weights (optional)")
     parser.add_argument("--output_dir", type=str, default="./outputs/stage3_coconut")
@@ -572,6 +582,8 @@ def train_stage3():
     parser.add_argument("--cf_prob", type=float, default=1.0, help="Probability of triggering a counterfactual paired-loss pass for a batch.")
     
     args = parser.parse_args()
+    qwen_model_path = _resolve_qwen_model_path(args.qwen_size)
+    set_tokenizer_model_path(qwen_model_path)
 
     # 1. 基础配置
     mol_config = {
@@ -674,7 +686,7 @@ def train_stage3():
 
         # 2.1 每一个 Stage 彻底重新初始化模型
         model = Qwen3MoleculeLLM(
-            qwen_model_name=ModelConfig.DEFAULT_QWEN_PATH,
+            qwen_model_name=qwen_model_path,
             mol_config=mol_config,
             is_coconut=is_coconut,
             is_both_latent=is_both_latent,

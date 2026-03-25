@@ -18,7 +18,7 @@ except Exception:  # pragma: no cover
     plt = None  # type: ignore[assignment]
 
 from config import ModelConfig
-from dataloader import load_grpo_data
+from dataloader import load_grpo_data, set_tokenizer_model_path
 from model_stage3 import Qwen3MoleculeLLM
 from trainer_try2.grpo_trainer import QwenMoleculeGRPOTrainer
 from trainer_try2.grpo_config import GRPOConfig
@@ -35,6 +35,10 @@ from trainer_try2.reward_func import (
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _resolve_qwen_model_path(qwen_size: str) -> str:
+    return ModelConfig.require_qwen_path(qwen_size)
 
 def _find_latest_checkpoint(run_dir: str) -> str | None:
     if not run_dir or (not os.path.isdir(run_dir)):
@@ -203,6 +207,12 @@ def load_trained_components_stage3(model, lora_weights_path=None, mm_projector_p
 
 def main():
     parser = argparse.ArgumentParser(description="GRPO try1 training for Bio-LatentCOT (smiles-aware, optional vLLM).")
+    parser.add_argument(
+        "--qwen_size",
+        type=str,
+        default=ModelConfig.DEFAULT_QWEN_SIZE,
+        help="Qwen backbone size. Allowed: 0.6b, 1.7b, 4b, 8b, 14b. Default: 8b.",
+    )
     parser.add_argument(
         "--use_reward_answer_tag",
         type=lambda x: (str(x).lower() == "true"),
@@ -465,12 +475,16 @@ def main():
     parser.add_argument(
         "--vllm_ckpt",
         type=str,
-        default=ModelConfig.DEFAULT_QWEN_PATH,
-        help="vLLM base model checkpoint path/name (defaults to ModelConfig.DEFAULT_QWEN_PATH).",
+        default=None,
+        help="Optional vLLM base model checkpoint path/name. Defaults to the resolved --qwen_size path.",
     )
     parser.add_argument("--vllm_max_model_len", type=int, default=4096, help="Maximum model length for vLLM engine.")
 
     args = parser.parse_args()
+    qwen_model_path = _resolve_qwen_model_path(args.qwen_size)
+    set_tokenizer_model_path(qwen_model_path)
+    if args.vllm_ckpt is None:
+        args.vllm_ckpt = qwen_model_path
 
     run_name = args.run_name or f"grpo_try1-{datetime.now().strftime('%m%d-%H%M')}"
     os.makedirs(args.output_dir, exist_ok=True)
@@ -505,7 +519,7 @@ def main():
     if enable_corruption and (not use_both_latent):
         raise ValueError("corrupt_prob>0 requires --is_both_latent true (task latents must exist to corrupt).")
     model = Qwen3MoleculeLLM(
-        qwen_model_name=ModelConfig.DEFAULT_QWEN_PATH,
+        qwen_model_name=qwen_model_path,
         mol_config=mol_config,
         is_both_latent=use_both_latent,
         is_biothinker=bool(args.is_biothinker),

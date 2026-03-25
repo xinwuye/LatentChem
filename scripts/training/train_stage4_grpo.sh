@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 # Stage 4: GRPO Training
 echo "Starting Training Stage 4 (GRPO)..."
 cd code_train_sft 
@@ -30,6 +32,7 @@ accelerate launch --multi_gpu --num_processes 8 train_grpo_try2.py \
   --vllm_max_model_len 4096 \
   --temperature 1.5 \
   --gradient_checkpointing \
-  --freeze_bio_updater true --freeze_task_thinker true
+  --freeze_bio_updater true --freeze_task_thinker true \
+  "$@"
 
 cd ..
