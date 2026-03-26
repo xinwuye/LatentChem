@@ -26,7 +26,10 @@ from trainer_try2.reward_func import (
     format_reward_answer_tag,
     reward_answer_correctness,
     reward_answer_correctness_bench,
+    reward_answer_correctness_bench_output_cot_scaled,
     reward_answer_type_validity,
+    reward_answer_tag_output_cot_scaled,
+    reward_answer_type_validity_output_cot_scaled,
     reward_stage4_corrupt_or_correct,
     reward_stage4_double_scaled_correctness,
     reward_stage4_scaled_correctness,
@@ -230,6 +233,39 @@ def main():
         type=lambda x: (str(x).lower() == "true"),
         default=False,
         help="Include `reward_answer_correctness_bench` in reward functions.",
+    )
+    parser.add_argument(
+        "--use_reward_answer_tag_output_cot_scaled",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help=(
+            "Include an output-CoT-scaled variant of `format_reward_answer_tag`. "
+            "scaled_reward = (output_cot_len + 400) * base_reward / 400.0, where output_cot_len is the tokenizer "
+            "token length of the response prefix before the last exact lowercase `<answer>`; if no `<answer>` "
+            "exists, the whole response length is used."
+        ),
+    )
+    parser.add_argument(
+        "--use_reward_answer_type_validity_output_cot_scaled",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help=(
+            "Include an output-CoT-scaled variant of `reward_answer_type_validity`. "
+            "scaled_reward = (output_cot_len + 400) * base_reward / 400.0, where output_cot_len is the tokenizer "
+            "token length of the response prefix before the last exact lowercase `<answer>`; if no `<answer>` "
+            "exists, the whole response length is used."
+        ),
+    )
+    parser.add_argument(
+        "--use_reward_answer_correctness_bench_output_cot_scaled",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help=(
+            "Include an output-CoT-scaled variant of `reward_answer_correctness_bench`. "
+            "scaled_reward = (output_cot_len + 400) * base_reward / 400.0, where output_cot_len is the tokenizer "
+            "token length of the response prefix before the last exact lowercase `<answer>`; if no `<answer>` "
+            "exists, the whole response length is used."
+        ),
     )
     parser.add_argument(
         "--use_reward_answer_correctness",
@@ -609,6 +645,12 @@ def main():
         reward_funcs.append(reward_answer_correctness)
     if bool(args.use_reward_answer_correctness_bench):
         reward_funcs.append(reward_answer_correctness_bench)
+    if bool(args.use_reward_answer_tag_output_cot_scaled):
+        reward_funcs.append(reward_answer_tag_output_cot_scaled)
+    if bool(args.use_reward_answer_type_validity_output_cot_scaled):
+        reward_funcs.append(reward_answer_type_validity_output_cot_scaled)
+    if bool(args.use_reward_answer_correctness_bench_output_cot_scaled):
+        reward_funcs.append(reward_answer_correctness_bench_output_cot_scaled)
     if bool(args.use_reward_stage4_corrupt_or_correct):
         reward_funcs.append(reward_stage4_corrupt_or_correct)
     if bool(args.use_reward_stage4_scaled_correctness):

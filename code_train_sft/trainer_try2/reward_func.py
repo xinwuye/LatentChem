@@ -13,7 +13,7 @@ import math
 import os
 import re
 import sys
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 import torch
 
@@ -64,6 +64,8 @@ _PROMPT_EXPECT_RE = re.compile(
 )
 
 _RDKit_LOGS_DISABLED = False
+_OUTPUT_COT_SCALE_OFFSET = 400.0
+_OUTPUT_COT_SCALE_DIVISOR = 400.0
 
 
 def _get_rdkit_chem():
@@ -79,6 +81,70 @@ def _get_rdkit_chem():
         RDLogger.DisableLog("rdApp.warning")
         _RDKit_LOGS_DISABLED = True
     return Chem
+
+
+def _get_runtime_tokenizer():
+    try:
+        from dataloader import get_tokenizer
+    except Exception as e:  # pragma: no cover
+        raise ImportError("Failed to import `get_tokenizer()` from `dataloader`.") from e
+
+    tokenizer = get_tokenizer()
+    if tokenizer is None:
+        raise RuntimeError("Runtime tokenizer is None.")
+    return tokenizer
+
+
+def _extract_output_cot_prefix(completion: str) -> str:
+    if not isinstance(completion, str):
+        raise TypeError(f"Completion must be a string, got: {type(completion)}")
+    answer_start = completion.rfind("<answer>")
+    if answer_start == -1:
+        return completion
+    return completion[:answer_start]
+
+
+def _get_output_cot_token_len(completion: str) -> int:
+    prefix = _extract_output_cot_prefix(completion)
+    tokenizer = _get_runtime_tokenizer()
+    encoded = tokenizer(prefix, add_special_tokens=False)
+    input_ids = encoded.get("input_ids")
+    if not isinstance(input_ids, list):
+        raise TypeError(f"Tokenizer returned non-list input_ids: {type(input_ids)}")
+    return len(input_ids)
+
+
+def _apply_output_cot_scaling(
+    base_reward_func: Callable[..., List[float]],
+    *,
+    prompts: List[str],
+    completions: List[str],
+    completion_ids=None,
+    **kwargs,
+) -> List[float]:
+    if not isinstance(completions, list):
+        raise TypeError(f"`completions` must be a list, got: {type(completions)}")
+
+    base_rewards = base_reward_func(
+        prompts=prompts,
+        completions=completions,
+        completion_ids=completion_ids,
+        **kwargs,
+    )
+    if isinstance(base_rewards, torch.Tensor):
+        base_rewards = base_rewards.detach().cpu().tolist()
+    if not isinstance(base_rewards, list):
+        raise TypeError(f"Base reward func must return a list, got: {type(base_rewards)}")
+    if len(base_rewards) != len(completions):
+        raise ValueError(
+            f"Base reward length mismatch: got {len(base_rewards)} rewards for {len(completions)} completions."
+        )
+
+    scaled_rewards: list[float] = []
+    for completion, reward in zip(completions, base_rewards, strict=True):
+        output_cot_len = float(_get_output_cot_token_len(completion))
+        scaled_rewards.append(((output_cot_len + _OUTPUT_COT_SCALE_OFFSET) * float(reward)) / _OUTPUT_COT_SCALE_DIVISOR)
+    return scaled_rewards
 
 
 def _infer_expected_answer_type(prompt: str) -> str:
@@ -204,6 +270,36 @@ def reward_answer_type_validity(
             rewards.append(0.0)
 
     return rewards
+
+
+def reward_answer_tag_output_cot_scaled(
+    prompts: List[str],
+    completions: List[str],
+    completion_ids=None,
+    **kwargs,
+):
+    return _apply_output_cot_scaling(
+        format_reward_answer_tag,
+        prompts=prompts,
+        completions=completions,
+        completion_ids=completion_ids,
+        **kwargs,
+    )
+
+
+def reward_answer_type_validity_output_cot_scaled(
+    prompts: List[str],
+    completions: List[str],
+    completion_ids=None,
+    **kwargs,
+):
+    return _apply_output_cot_scaling(
+        reward_answer_type_validity,
+        prompts=prompts,
+        completions=completions,
+        completion_ids=completion_ids,
+        **kwargs,
+    )
 
 
 def reward_answer_correctness(
@@ -490,6 +586,21 @@ def reward_answer_correctness_bench(
         rewards.append(2.0 if ok else 0.0)
 
     return rewards
+
+
+def reward_answer_correctness_bench_output_cot_scaled(
+    prompts: List[str],
+    completions: List[str],
+    completion_ids=None,
+    **kwargs,
+):
+    return _apply_output_cot_scaling(
+        reward_answer_correctness_bench,
+        prompts=prompts,
+        completions=completions,
+        completion_ids=completion_ids,
+        **kwargs,
+    )
 
 
 def reward_stage4_corrupt_or_correct(
