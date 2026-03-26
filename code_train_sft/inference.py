@@ -121,6 +121,7 @@ def run_inference_on_dataset(
     top_p=0.9,
     inference_batch_size: int = 8,
     num_return_sequences: int = 1,
+    use_cache: bool = True,
 ):
     """Run inference over a prepared dataset using mini-batches.
 
@@ -182,6 +183,7 @@ def run_inference_on_dataset(
                 temperature=temperature,
                 top_p=top_p,
                 do_sample=True if temperature > 0 else False,
+                use_cache=use_cache,
                 num_return_sequences=num_return_sequences,
             ) # (B * N, L)
         
@@ -212,20 +214,19 @@ def run_inference_on_dataset(
         else:     
             for decoded in decoded_list:
                 generation_outputs.append({"result": decoded.strip()})
-        
-        try: 
-            del gen_tensor
-            del gen_tensor_cpu
-            del generated_ids
-        except:
-            pass
 
-    return generation_outputs
+    return generation_outputs, model.sample_latent_flops, model.sample_step_latent_flops, model.sample_inner_flops, model.total_time, model.latent_time, model.text_time
 
 def save_inference_results(
     save_results_path,
     per_sample_metadata,
     generation_outputs,
+    total_profile,
+    per_step_profile,
+    inner_profile,
+    total_time,
+    latent_time,
+    text_time,
     model,
     test_data_path,
     generation_config,
@@ -261,6 +262,22 @@ def save_inference_results(
     os.makedirs(os.path.dirname(save_results_path) if os.path.dirname(save_results_path) else ".", exist_ok=True)
     with open(save_results_path, "w", encoding="utf-8") as f:
         json.dump(save_data, f, indent=2, ensure_ascii=False)
+
+    if total_profile:
+        df_total = pd.DataFrame(total_profile, columns=["flops"])
+        df_total.to_csv(os.path.splitext(save_results_path)[0] + ".total_profile.csv", index=False)
+
+    if per_step_profile:
+        df_step = pd.DataFrame(per_step_profile, columns=["steps"])
+        df_step.to_csv(os.path.splitext(save_results_path)[0] + ".total_textual_steps.csv", index=False)
+
+    if inner_profile:
+        df_step = pd.DataFrame(inner_profile, columns=["flops"])
+        df_step.to_csv(os.path.splitext(save_results_path)[0] + ".inner_profile.csv", index=False)
+
+    if total_time:
+        df_total_time = pd.DataFrame({"total_time": total_time, "latent_time": latent_time, "text_time": text_time})
+        df_total_time.to_csv(os.path.splitext(save_results_path)[0] + ".time.csv", index=False)
 
     logger.info(f"Results saved to: {save_results_path}")
 
@@ -402,7 +419,14 @@ def inference_stage3():
         default=10,
         help="Max loop steps when generating task latents during inference (get_prompt_embeddings).",
     )
-    
+    parser.add_argument(
+        "--use_cache",
+        type=lambda x: (str(x).lower() == "true"),
+        default=True,
+        help="suck my dick"
+    )
+
+
     parser.add_argument("--proc_index", type=int, default=0,
                     help="当前进程索引 (0-based)，用于样本分片")
     parser.add_argument("--num_procs", type=int, default=1,
@@ -576,7 +600,7 @@ def inference_stage3():
         )
         
         # 2.3 batched inference
-        results = run_inference_on_dataset(
+        results, total_profile, per_step_profile, inner_profile, total_time, latent_time, text_time = run_inference_on_dataset(
             model=model,
             tokenizer=tokenizer,
             dataset=dataset,
@@ -586,12 +610,19 @@ def inference_stage3():
             top_p=args.top_p,
             inference_batch_size=args.batch_size,
             num_return_sequences=args.num_return_sequences,
+            use_cache=args.use_cache
         )
         
         # 3. save results
         
         save_inference_results(
             save_results_path=args.inference_results_path,
+            total_profile=total_profile,
+            per_step_profile=per_step_profile,
+            inner_profile=inner_profile,
+            total_time=total_time,
+            latent_time=latent_time,
+            text_time=text_time,
             per_sample_metadata=per_sample_metadata,
             generation_outputs=results,
             model=model,

@@ -16,7 +16,9 @@ from smi_ted_light.loadnew import load_smi_ted
 import torch.nn.functional as F
 from transformers.generation.utils import GenerationConfig
 from typing import Optional, List
-
+import torch
+from torch.utils.flop_counter import FlopCounterMode
+from torch.utils._python_dispatch import _disable_current_modes
 
 @dataclass
 class BioLatentCausalLMOutputWithPast(CausalLMOutputWithPast):
@@ -1340,439 +1342,451 @@ class Qwen3MoleculeLLM(PreTrainedModel):
             use_bioupdater = bool(self.is_bioupdater)
         use_coconut = bool(self.is_coconut)
 
-        # Corruption flags are per-sample (B,). When enabled, task latent embeddings are generated normally, then
-        # replaced with "no-information" vectors before answer generation.
-        if corrupt_task_latents is None:
-            corrupt_flags = [False for _ in range(B)]
-        elif isinstance(corrupt_task_latents, torch.Tensor):
-            corrupt_flags = [bool(x) for x in corrupt_task_latents.detach().cpu().tolist()]
-        else:
-            corrupt_flags = [bool(x) for x in corrupt_task_latents]
-        if len(corrupt_flags) != B:
-            raise ValueError(f"corrupt_task_latents length mismatch: got {len(corrupt_flags)} expected {B}")
-
-        self._last_task_latent_counts = [0 for _ in range(B)]
-        # If `is_both_latent=True`, BioUpdater is always enabled. Otherwise it's controlled by `is_bioupdater`.
-        refine_bio_tokens = True if use_both_latent else (bool(refine_bio_tokens) and use_bioupdater)
-
-        # NOTE: This function is used both for generation (call under `torch.no_grad()` / `torch.inference_mode()`)
-        # and for GRPO log-prob computation (needs gradients for projector/bio_updater/bio_thinker/task_thinker).
-
-        # =========================================================
-        # 1. Molecule features: flatten + batch projection
-        # =========================================================
-        with torch.no_grad():
-            mol_emb_nested = self.mol_encoder.encode(smiles_list)
-
-        flat_mols = []
-        mol_counts = []
-        for sample_mols in mol_emb_nested:
-            mol_counts.append(len(sample_mols))
-            flat_mols.extend(sample_mols)
-
-        if flat_mols:
-            max_L_mol = max(m.size(0) for m in flat_mols)
-            padded_mols = torch.zeros(
-                len(flat_mols), max_L_mol, self.mol_input_dim, device=device, dtype=self.model.dtype
-            )
-            mol_key_padding_mask = torch.ones(len(flat_mols), max_L_mol, device=device, dtype=torch.bool)
-
-            for i, m in enumerate(flat_mols):
-                curr_L = m.size(0)
-                padded_mols[i, :curr_L] = m.to(device=device, dtype=self.model.dtype)
-                mol_key_padding_mask[i, :curr_L] = False
-
-            flat_feats_llm = self.projector(padded_mols, key_padding_mask=mol_key_padding_mask)
-        else:
-            flat_feats_llm = []
-
-        # LLM embedding layer
-        embed = self.model.get_input_embeddings()
-        start_emb = embed(torch.tensor([[self.start_id]], device=device))
-        end_emb = embed(torch.tensor([[self.end_id]], device=device))
-        start_bio_latent_emb = embed(torch.tensor([[self.start_bio_latent_id]], device=device))
-        bio_latent_emb = embed(torch.tensor([[self.bio_latent_id]], device=device))
-        end_bio_latent_emb = embed(torch.tensor([[self.end_bio_latent_id]], device=device))
-        start_latent_emb = embed(torch.tensor([[self.start_latent_id]], device=device))
-        end_latent_emb = embed(torch.tensor([[self.end_latent_id]], device=device))
-
-        # =========================================================
-        # 2. Reconstruct + fuse variable-length (strip text padding)
-        # =========================================================
-        text_emb = embed(input_ids).to(dtype=self.model.dtype)
-        fused_samples_list = []
-        bio_positions_list = []
-        bio_latent_positions_list = []
-        bio_latent_block_spans_list = []
-        bio_latent_anchor_pos_list = []
-        cursor = 0
-
-        for b in range(B):
-            sample_mol_parts = []
-            b_bio_indices = []
-            current_mol_offset = 0
-            for _ in range(mol_counts[b]):
-                m_feat = flat_feats_llm[cursor].unsqueeze(0)
-                m_with_tags = torch.cat([start_emb, m_feat, end_emb], dim=1)
-                sample_mol_parts.append(m_with_tags)
-
-                start_query_pos = current_mol_offset + 1
-                end_query_pos = start_query_pos + self.num_queries
-                b_bio_indices.extend(range(start_query_pos, end_query_pos))
-                current_mol_offset += (self.num_queries + 2)
-                cursor += 1
-
-            bio_positions_list.append(b_bio_indices)
-            mol_part = (
-                torch.cat(sample_mol_parts, dim=1)
-                if sample_mol_parts
-                else torch.zeros(1, 0, self.d_llm, device=device, dtype=self.model.dtype)
-            )
-
-            if attention_mask is not None:
-                non_pad_indices = attention_mask[b].bool()
-                t_emb = text_emb[b][non_pad_indices]
+        self.total_inference_flops = 0
+        with FlopCounterMode(display=False) as flop_counter:
+            # Corruption flags are per-sample (B,). When enabled, task latent embeddings are generated normally, then
+            # replaced with "no-information" vectors before answer generation.
+            if corrupt_task_latents is None:
+                corrupt_flags = [False for _ in range(B)]
+            elif isinstance(corrupt_task_latents, torch.Tensor):
+                corrupt_flags = [bool(x) for x in corrupt_task_latents.detach().cpu().tolist()]
             else:
-                t_emb = text_emb[b]
+                corrupt_flags = [bool(x) for x in corrupt_task_latents]
+            if len(corrupt_flags) != B:
+                raise ValueError(f"corrupt_task_latents length mismatch: got {len(corrupt_flags)} expected {B}")
 
-            n_bio_latents = mol_counts[b]
-            bio_latent_block = None
-            bio_latent_positions = []
-            if use_biothinker and n_bio_latents > 0:
-                bio_latents = bio_latent_emb.expand(1, n_bio_latents, -1)
-                bio_latent_block = torch.cat([start_bio_latent_emb, bio_latents, end_bio_latent_emb], dim=1)
+            self._last_task_latent_counts = [0 for _ in range(B)]
+            # If `is_both_latent=True`, BioUpdater is always enabled. Otherwise it's controlled by `is_bioupdater`.
+            refine_bio_tokens = True if use_both_latent else (bool(refine_bio_tokens) and use_bioupdater)
 
-                base_len = mol_part.size(1) + t_emb.size(0)
-                bio_latent_positions = list(range(base_len + 1, base_len + 1 + n_bio_latents))
-                bio_latent_block_spans_list.append((int(base_len), int(base_len + n_bio_latents + 2)))
-                bio_latent_anchor_pos_list.append(max(int(base_len) - 1, 0))
+            # NOTE: This function is used both for generation (call under `torch.no_grad()` / `torch.inference_mode()`)
+            # and for GRPO log-prob computation (needs gradients for projector/bio_updater/bio_thinker/task_thinker).
+
+            # =========================================================
+            # 1. Molecule features: flatten + batch projection
+            # =========================================================
+            with torch.no_grad():
+                mol_emb_nested = self.mol_encoder.encode(smiles_list)
+
+            flat_mols = []
+            mol_counts = []
+            for sample_mols in mol_emb_nested:
+                mol_counts.append(len(sample_mols))
+                flat_mols.extend(sample_mols)
+
+            if flat_mols:
+                max_L_mol = max(m.size(0) for m in flat_mols)
+                padded_mols = torch.zeros(
+                    len(flat_mols), max_L_mol, self.mol_input_dim, device=device, dtype=self.model.dtype
+                )
+                mol_key_padding_mask = torch.ones(len(flat_mols), max_L_mol, device=device, dtype=torch.bool)
+
+                for i, m in enumerate(flat_mols):
+                    curr_L = m.size(0)
+                    padded_mols[i, :curr_L] = m.to(device=device, dtype=self.model.dtype)
+                    mol_key_padding_mask[i, :curr_L] = False
+
+                flat_feats_llm = self.projector(padded_mols, key_padding_mask=mol_key_padding_mask)
             else:
-                bio_latent_block_spans_list.append(None)
-                bio_latent_anchor_pos_list.append(None)
+                flat_feats_llm = []
 
-            bio_latent_positions_list.append(bio_latent_positions)
+            # LLM embedding layer
+            embed = self.model.get_input_embeddings()
+            start_emb = embed(torch.tensor([[self.start_id]], device=device))
+            end_emb = embed(torch.tensor([[self.end_id]], device=device))
+            start_bio_latent_emb = embed(torch.tensor([[self.start_bio_latent_id]], device=device))
+            bio_latent_emb = embed(torch.tensor([[self.bio_latent_id]], device=device))
+            end_bio_latent_emb = embed(torch.tensor([[self.end_bio_latent_id]], device=device))
+            start_latent_emb = embed(torch.tensor([[self.start_latent_id]], device=device))
+            end_latent_emb = embed(torch.tensor([[self.end_latent_id]], device=device))
 
-            parts = [mol_part, t_emb.unsqueeze(0)]
-            if bio_latent_block is not None:
-                parts.append(bio_latent_block)
-            # NOTE: Coconut mode already includes <start_latent>/<latent>/<end_latent> in `input_ids`.
-            if use_taskthinker and (not use_coconut):
-                parts.append(start_latent_emb)
-            fused_samples_list.append(torch.cat(parts, dim=1))
+            # =========================================================
+            # 2. Reconstruct + fuse variable-length (strip text padding)
+            # =========================================================
+            text_emb = embed(input_ids).to(dtype=self.model.dtype)
+            fused_samples_list = []
+            bio_positions_list = []
+            bio_latent_positions_list = []
+            bio_latent_block_spans_list = []
+            bio_latent_anchor_pos_list = []
+            cursor = 0
 
-        # =========================================================
-        # 3. Left pad to batch max length (generation-style)
-        # =========================================================
-        max_fused_L = max(s.size(1) for s in fused_samples_list)
-        prompt_embeds = torch.zeros(B, max_fused_L, self.d_llm, device=device, dtype=self.model.dtype)
-        prompt_attn_mask = torch.zeros(B, max_fused_L, device=device, dtype=torch.long)
-
-        diffs = []
-        for b in range(B):
-            curr_L = fused_samples_list[b].size(1)
-            diff = max_fused_L - curr_L
-            diffs.append(diff)
-            prompt_embeds[b, diff:] = fused_samples_list[b]
-            prompt_attn_mask[b, diff:] = 1
-
-        # =========================================================
-        # 3b. Bio thinker: one-pass hidden thoughts for bio-latent tokens
-        # =========================================================
-        if use_biothinker and any(bio_latent_positions_list):
-            # IMPORTANT: BioThinker is bidirectional; mask out the trailing <start_latent> token so it can't
-            # (even trivially) influence bio-latent embeddings.
-            bio_thinker_mask = prompt_attn_mask.clone()
             for b in range(B):
-                curr_L = int(fused_samples_list[b].size(1))
-                if curr_L <= 0:
-                    continue
-                if (not use_coconut) and use_taskthinker:
-                    # When TaskThinker is enabled (non-coconut), each sample ends with an appended <start_latent>.
-                    start_latent_pos = int(diffs[b] + curr_L - 1)
-                    if 0 <= start_latent_pos < bio_thinker_mask.size(1):
-                        bio_thinker_mask[b, start_latent_pos] = 0
+                sample_mol_parts = []
+                b_bio_indices = []
+                current_mol_offset = 0
+                for _ in range(mol_counts[b]):
+                    m_feat = flat_feats_llm[cursor].unsqueeze(0)
+                    m_with_tags = torch.cat([start_emb, m_feat, end_emb], dim=1)
+                    sample_mol_parts.append(m_with_tags)
 
-            thinker_out = self.bio_thinker(prompt_embeds, attention_mask=bio_thinker_mask)
-            prompt_embeds_updated = prompt_embeds.clone()
+                    start_query_pos = current_mol_offset + 1
+                    end_query_pos = start_query_pos + self.num_queries
+                    b_bio_indices.extend(range(start_query_pos, end_query_pos))
+                    current_mol_offset += (self.num_queries + 2)
+                    cursor += 1
+
+                bio_positions_list.append(b_bio_indices)
+                mol_part = (
+                    torch.cat(sample_mol_parts, dim=1)
+                    if sample_mol_parts
+                    else torch.zeros(1, 0, self.d_llm, device=device, dtype=self.model.dtype)
+                )
+
+                if attention_mask is not None:
+                    non_pad_indices = attention_mask[b].bool()
+                    t_emb = text_emb[b][non_pad_indices]
+                else:
+                    t_emb = text_emb[b]
+
+                n_bio_latents = mol_counts[b]
+                bio_latent_block = None
+                bio_latent_positions = []
+                if use_biothinker and n_bio_latents > 0:
+                    bio_latents = bio_latent_emb.expand(1, n_bio_latents, -1)
+                    bio_latent_block = torch.cat([start_bio_latent_emb, bio_latents, end_bio_latent_emb], dim=1)
+
+                    base_len = mol_part.size(1) + t_emb.size(0)
+                    bio_latent_positions = list(range(base_len + 1, base_len + 1 + n_bio_latents))
+                    bio_latent_block_spans_list.append((int(base_len), int(base_len + n_bio_latents + 2)))
+                    bio_latent_anchor_pos_list.append(max(int(base_len) - 1, 0))
+                else:
+                    bio_latent_block_spans_list.append(None)
+                    bio_latent_anchor_pos_list.append(None)
+
+                bio_latent_positions_list.append(bio_latent_positions)
+
+                parts = [mol_part, t_emb.unsqueeze(0)]
+                if bio_latent_block is not None:
+                    parts.append(bio_latent_block)
+                # NOTE: Coconut mode already includes <start_latent>/<latent>/<end_latent> in `input_ids`.
+                if use_taskthinker and (not use_coconut):
+                    parts.append(start_latent_emb)
+                fused_samples_list.append(torch.cat(parts, dim=1))
+
+            # =========================================================
+            # 3. Left pad to batch max length (generation-style)
+            # =========================================================
+            max_fused_L = max(s.size(1) for s in fused_samples_list)
+            prompt_embeds = torch.zeros(B, max_fused_L, self.d_llm, device=device, dtype=self.model.dtype)
+            prompt_attn_mask = torch.zeros(B, max_fused_L, device=device, dtype=torch.long)
+
+            diffs = []
             for b in range(B):
-                positions = bio_latent_positions_list[b]
-                if positions:
-                    shifted = [p + diffs[b] for p in positions]
-                    prompt_embeds_updated[b, shifted] = thinker_out[b, shifted].to(dtype=prompt_embeds_updated.dtype)
-            if self.is_biothinker_gating and self.bio_thinker_gate is not None:
-                active_indices = [b for b in range(B) if bio_latent_block_spans_list[b] is not None]
-                if active_indices:
-                    anchor_states = []
-                    gate_inputs = []
-                    spans_shifted = []
-                    for b in active_indices:
-                        span = bio_latent_block_spans_list[b]
-                        anchor_pos = bio_latent_anchor_pos_list[b]
-                        if span is None or anchor_pos is None:
-                            continue
-                        diff = int(diffs[b])
-                        start, end = span
-                        start_s = diff + int(start)
-                        end_s = diff + int(end)
-                        anchor_s = diff + int(anchor_pos)
-                        anchor_states.append(prompt_embeds_updated[b, anchor_s])
-                        gate_inputs.append(thinker_out[b, anchor_s])
-                        spans_shifted.append((b, start_s, end_s))
+                curr_L = fused_samples_list[b].size(1)
+                diff = max_fused_L - curr_L
+                diffs.append(diff)
+                prompt_embeds[b, diff:] = fused_samples_list[b]
+                prompt_attn_mask[b, diff:] = 1
 
-                    if anchor_states:
-                        anchor_states_t = torch.stack(anchor_states, dim=0)
-                        gate_inputs_t = torch.stack(gate_inputs, dim=0)
-                        gates = self.bio_thinker_gate(gate_inputs_t, out_dtype=prompt_embeds_updated.dtype)
-                        for i, (b, start_s, end_s) in enumerate(spans_shifted):
-                            if end_s <= start_s:
+            # =========================================================
+            # 3b. Bio thinker: one-pass hidden thoughts for bio-latent tokens
+            # =========================================================
+            if use_biothinker and any(bio_latent_positions_list):
+                # IMPORTANT: BioThinker is bidirectional; mask out the trailing <start_latent> token so it can't
+                # (even trivially) influence bio-latent embeddings.
+                bio_thinker_mask = prompt_attn_mask.clone()
+                for b in range(B):
+                    curr_L = int(fused_samples_list[b].size(1))
+                    if curr_L <= 0:
+                        continue
+                    if (not use_coconut) and use_taskthinker:
+                        # When TaskThinker is enabled (non-coconut), each sample ends with an appended <start_latent>.
+                        start_latent_pos = int(diffs[b] + curr_L - 1)
+                        if 0 <= start_latent_pos < bio_thinker_mask.size(1):
+                            bio_thinker_mask[b, start_latent_pos] = 0
+
+                thinker_out = self.bio_thinker(prompt_embeds, attention_mask=bio_thinker_mask)
+                prompt_embeds_updated = prompt_embeds.clone()
+                for b in range(B):
+                    positions = bio_latent_positions_list[b]
+                    if positions:
+                        shifted = [p + diffs[b] for p in positions]
+                        prompt_embeds_updated[b, shifted] = thinker_out[b, shifted].to(dtype=prompt_embeds_updated.dtype)
+                if self.is_biothinker_gating and self.bio_thinker_gate is not None:
+                    active_indices = [b for b in range(B) if bio_latent_block_spans_list[b] is not None]
+                    if active_indices:
+                        anchor_states = []
+                        gate_inputs = []
+                        spans_shifted = []
+                        for b in active_indices:
+                            span = bio_latent_block_spans_list[b]
+                            anchor_pos = bio_latent_anchor_pos_list[b]
+                            if span is None or anchor_pos is None:
                                 continue
-                            g = gates[i, 0, 0]
-                            anchor = anchor_states_t[i].to(dtype=prompt_embeds_updated.dtype)
-                            bio_block = prompt_embeds_updated[b, start_s:end_s].clone()
-                            prompt_embeds_updated[b, start_s:end_s] = bio_block * g + anchor.unsqueeze(0) * (1.0 - g)
-            prompt_embeds = prompt_embeds_updated
+                            diff = int(diffs[b])
+                            start, end = span
+                            start_s = diff + int(start)
+                            end_s = diff + int(end)
+                            anchor_s = diff + int(anchor_pos)
+                            anchor_states.append(prompt_embeds_updated[b, anchor_s])
+                            gate_inputs.append(thinker_out[b, anchor_s])
+                            spans_shifted.append((b, start_s, end_s))
 
-        # =========================================================
-        # 4. Coconut latent-feedback refinement (optional based on presence of <latent>)
-        # =========================================================
-        has_latent = (input_ids == self.latent_id).any().item()
-        if use_coconut and has_latent and attention_mask is not None:
-            latent_positions = []
-            final_bio_positions = []
-            for b in range(B):
-                mol_len_b = mol_counts[b] * (self.num_queries + 2)
-                t_mask_b = attention_mask[b].bool()
-                rel_latent_indices = (input_ids[b][t_mask_b] == self.latent_id).nonzero(as_tuple=True)[0]
-                diff = diffs[b]
-                latent_positions.append((rel_latent_indices + mol_len_b + diff).tolist())
-                final_bio_positions.append([idx + diff for idx in bio_positions_list[b]])
+                        if anchor_states:
+                            anchor_states_t = torch.stack(anchor_states, dim=0)
+                            gate_inputs_t = torch.stack(gate_inputs, dim=0)
+                            gates = self.bio_thinker_gate(gate_inputs_t, out_dtype=prompt_embeds_updated.dtype)
+                            for i, (b, start_s, end_s) in enumerate(spans_shifted):
+                                if end_s <= start_s:
+                                    continue
+                                g = gates[i, 0, 0]
+                                anchor = anchor_states_t[i].to(dtype=prompt_embeds_updated.dtype)
+                                bio_block = prompt_embeds_updated[b, start_s:end_s].clone()
+                                prompt_embeds_updated[b, start_s:end_s] = bio_block * g + anchor.unsqueeze(0) * (1.0 - g)
+                prompt_embeds = prompt_embeds_updated
 
-            prompt_embeds = self._apply_latent_feedback(
-                prompt_embeds,
-                prompt_attn_mask,
-                latent_positions,
-                bio_positions=final_bio_positions,
-                refine_bio_tokens=refine_bio_tokens,
-            )
+            # =========================================================
+            # 4. Coconut latent-feedback refinement (optional based on presence of <latent>)
+            # =========================================================
+            has_latent = (input_ids == self.latent_id).any().item()
+            if use_coconut and has_latent and attention_mask is not None:
+                latent_positions = []
+                final_bio_positions = []
+                for b in range(B):
+                    mol_len_b = mol_counts[b] * (self.num_queries + 2)
+                    t_mask_b = attention_mask[b].bool()
+                    rel_latent_indices = (input_ids[b][t_mask_b] == self.latent_id).nonzero(as_tuple=True)[0]
+                    diff = diffs[b]
+                    latent_positions.append((rel_latent_indices + mol_len_b + diff).tolist())
+                    final_bio_positions.append([idx + diff for idx in bio_positions_list[b]])
 
-        # =========================================================
-        # 5. Task latent generation (when TaskThinker is enabled)
-        # Each step: decode next token; if <end_latent> then append and stop,
-        # otherwise append a new latent embedding (from hidden state) refined by TaskThinker.
-        # =========================================================
-        # NOTE: Coconut mode already uses <start_latent>/<latent>/<end_latent> in `input_ids`; avoid duplicating.
-        if use_taskthinker and (not use_coconut):
-            llm = self._get_actual_llm()
-            backbone = llm.model
-            # has_lora_in_backbone = any(hasattr(m, "lora_A") and hasattr(m, "lora_B") for m in backbone.modules())
-            # if not has_lora_in_backbone:
-            #     raise RuntimeError("Expected LoRA layers in `llm.model` (backbone), but none was detected.")
-            lm_head = llm.lm_head
+                prompt_embeds = self._apply_latent_feedback(
+                    prompt_embeds,
+                    prompt_attn_mask,
+                    latent_positions,
+                    bio_positions=final_bio_positions,
+                    refine_bio_tokens=refine_bio_tokens,
+                )
 
-            new_samples = []
-            latent_mask_starts = []
-            latent_mask_ends = []
-            task_latent_counts = []
-            for b in range(B):
-                diff = diffs[b]
-                seq = prompt_embeds[b, diff:]  # [L_b, d]
-                if seq.size(0) == 0:
-                    new_samples.append(seq)
-                    task_latent_counts.append(0)
-                    continue
-                # We appended <start_latent> at the end.
-                base_prefix = seq[:-1].unsqueeze(0).clone()  # [1, L-1, d]
-                latent_block = seq[-1:].unsqueeze(0).clone()  # [1, 1, d] (starts with <start_latent>)
-                latent_state_hist = []
-                bio_positions = bio_positions_list[b]
-                bioupdater_gate_cache = None
+            # =========================================================
+            # 5. Task latent generation (when TaskThinker is enabled)
+            # Each step: decode next token; if <end_latent> then append and stop,
+            # otherwise append a new latent embedding (from hidden state) refined by TaskThinker.
+            # =========================================================
+            # NOTE: Coconut mode already uses <start_latent>/<latent>/<end_latent> in `input_ids`; avoid duplicating.
+            if use_taskthinker and (not use_coconut):
+                llm = self._get_actual_llm()
+                backbone = llm.model
+                # has_lora_in_backbone = any(hasattr(m, "lora_A") and hasattr(m, "lora_B") for m in backbone.modules())
+                # if not has_lora_in_backbone:
+                #     raise RuntimeError("Expected LoRA layers in `llm.model` (backbone), but none was detected.")
+                lm_head = llm.lm_head
 
-                ended = False
-                for current_latent_step in range(int(self.task_latent_max_steps)):
-                    full_seq = torch.cat([base_prefix, latent_block], dim=1)
-                    full_mask = torch.ones(1, full_seq.size(1), device=device, dtype=torch.long)
-                    # if self.mask_task_latent_steps > 0 and current_latent_step > 0:
-                    #     mask_steps = min(self.mask_task_latent_steps, current_latent_step)
-                    #     if self.mask_task_latent_implementation == 'mask':
-                    #         full_mask[:, base_prefix.size(1) + 1 : base_prefix.size(1) + 1 + mask_steps] = 0
-                    #     else:
-                    #         raise RuntimeError(f"Unimplemented mask_task_latent_implementation: {self.mask_task_latent_implementation}")
-                    # Task-latent token *sampling* does not need gradients; gradients are provided by the later GRPO
-                    # log-prob forward on the full (prompt + completion) sequence.
-                    with torch.no_grad():
-                        out = backbone(
-                            inputs_embeds=full_seq,
-                            attention_mask=full_mask,
-                            return_dict=True,
-                            use_cache=False,
-                        )
-                        last_hidden = out.last_hidden_state  # (1, L, d)
-                        logits_last = lm_head(last_hidden[:, -1, :])  # (1, vocab)
-                    next_id = int(logits_last.argmax(dim=-1).item())
-                    if next_id == int(self.end_latent_id):
+                new_samples = []
+                latent_mask_starts = []
+                latent_mask_ends = []
+                task_latent_counts = []
+                for b in range(B):
+                    diff = diffs[b]
+                    seq = prompt_embeds[b, diff:]  # [L_b, d]
+                    if seq.size(0) == 0:
+                        new_samples.append(seq)
+                        task_latent_counts.append(0)
+                        continue
+                    # We appended <start_latent> at the end.
+                    base_prefix = seq[:-1].unsqueeze(0).clone()  # [1, L-1, d]
+                    latent_block = seq[-1:].unsqueeze(0).clone()  # [1, 1, d] (starts with <start_latent>)
+                    latent_state_hist = []
+                    bio_positions = bio_positions_list[b]
+                    bioupdater_gate_cache = None
+
+                    ended = False
+                    for current_latent_step in range(int(self.task_latent_max_steps)):
+                        full_seq = torch.cat([base_prefix, latent_block], dim=1)
+                        full_mask = torch.ones(1, full_seq.size(1), device=device, dtype=torch.long)
+                        # if self.mask_task_latent_steps > 0 and current_latent_step > 0:
+                        #     mask_steps = min(self.mask_task_latent_steps, current_latent_step)
+                        #     if self.mask_task_latent_implementation == 'mask':
+                        #         full_mask[:, base_prefix.size(1) + 1 : base_prefix.size(1) + 1 + mask_steps] = 0
+                        #     else:
+                        #         raise RuntimeError(f"Unimplemented mask_task_latent_implementation: {self.mask_task_latent_implementation}")
+                        # Task-latent token *sampling* does not need gradients; gradients are provided by the later GRPO
+                        # log-prob forward on the full (prompt + completion) sequence.
+                        # step_inputs = {"inputs_embeds": full_seq, "attention_mask": full_mask, "use_cache": False}
+                        # self.total_inference_flops += FlopCountAnalysis(backbone, (), step_inputs).total()
+                        
+                        before_backbone = flop_counter.get_total_flops()
+                        with torch.no_grad():
+                            out = backbone(
+                                inputs_embeds=full_seq,
+                                attention_mask=full_mask,
+                                return_dict=True,
+                                use_cache=False,
+                            )
+                            last_hidden = out.last_hidden_state  # (1, L, d)
+                            logits_last = lm_head(last_hidden[:, -1, :])  # (1, vocab)
+                        
+                        after_backbone = flop_counter.get_total_flops()
+                        # just leave the all steps. tired.
+                        self.sample_inner_flops.append(after_backbone - before_backbone)
+
+                        next_id = int(logits_last.argmax(dim=-1).item())
+                        if next_id == int(self.end_latent_id):
+                            # print(current_latent_step)
+                            latent_block = torch.cat([latent_block, end_latent_emb], dim=1)
+                            ended = True
+                            break
+
+                        latent_state = last_hidden[:, -1:, :].to(dtype=torch.float32)
+                        # corrupt here
+                        # we corrupt every latent, including <start_latent>'s output
+                        if self.mask_task_latent_steps > current_latent_step:
+                            if self.mask_task_latent_implementation == 'noise':
+                                ids = input_ids[b].to(dtype=torch.int64)
+                                seed_val = int(((ids + 1) * 1315423911).sum().item()) & 0xFFFFFFFFFFFFFFFF
+                                gen = torch.Generator(device=latent_state.device)
+                                gen.manual_seed(seed_val)
+                                noise = torch.randn(
+                                    latent_state.shape,
+                                    generator=gen,
+                                    device=latent_block.device,
+                                    dtype=torch.float32,
+                                ) * float(self.mask_task_latent_noise_std)
+                                latent_state = noise.to(dtype=latent_state.dtype)
+                            elif self.mask_task_latent_implementation == 'zero':
+                                latent_state = torch.zeros_like(latent_state)
+                            else:
+                                raise NotImplementedError(
+                                    f"mask_task_latent_implementation={self.mask_task_latent_implementation} is not implemented. If you don't want to mask task latents, set `mask_task_latent_steps=0`.")
+                        latent_state_hist.append(latent_state)
+                        if refine_bio_tokens and bio_positions:
+                            batched_bio = base_prefix[:, bio_positions].to(dtype=self.model.dtype)
+                            batched_lat = torch.cat(latent_state_hist, dim=1).to(dtype=self.model.dtype)
+                            if self.is_bioupdater_gating:
+                                if bioupdater_gate_cache is None:
+                                    if self.bio_updater_gate is None:
+                                        raise RuntimeError(
+                                            "is_bioupdater_gating=True but `bio_updater_gate` is not initialized."
+                                        )
+                                    bioupdater_gate_cache = self.bio_updater_gate(
+                                        batched_lat[:, -1, :], out_dtype=batched_bio.dtype
+                                    )
+                                refined = self.bio_updater(batched_bio, batched_lat)
+                                refined = refined * bioupdater_gate_cache + batched_bio * (1.0 - bioupdater_gate_cache)
+                            else:
+                                refined = self.bio_updater(batched_bio, batched_lat)
+                            base_prefix[:, bio_positions] = refined.to(dtype=base_prefix.dtype)
+
+                        new_latent = latent_state.to(dtype=self.model.dtype)
+                        new_latent = self._taskthinker_with_gating(new_latent)
+                        latent_block = torch.cat([latent_block, new_latent], dim=1)
+
+                    if not ended:
                         latent_block = torch.cat([latent_block, end_latent_emb], dim=1)
-                        ended = True
-                        break
 
-                    latent_state = last_hidden[:, -1:, :].to(dtype=torch.float32)
-                    # corrupt here
-                    # we corrupt every latent, including <start_latent>'s output
-                    if self.mask_task_latent_steps > current_latent_step:
-                        if self.mask_task_latent_implementation == 'noise':
+                    n_task_latents = max(int(latent_block.size(1)) - 2, 0)
+                    task_latent_counts.append(n_task_latents)
+
+                    # if self.mask_task_latent_steps > 0 and latent_block.size(1) > 2:
+                    #     mask_steps = min(self.mask_task_latent_steps, latent_block.size(1) - 2)
+                    #     # print(mask_steps, self.mask_task_latent_steps, latent_block.size(1) - 2)
+                    #     latent_block = latent_block.clone()
+                    #     if self.mask_task_latent_implementation == 'noise':
+                    #         ids = input_ids[b].to(dtype=torch.int64)
+                    #         seed_val = int(((ids + 1) * 1315423911).sum().item()) & 0xFFFFFFFFFFFFFFFF
+                    #         gen = torch.Generator(device=latent_block.device)
+                    #         gen.manual_seed(seed_val)
+                    #         noise = torch.randn(
+                    #             latent_block[:, 1:1 + mask_steps, :].shape,
+                    #             generator=gen,
+                    #             device=latent_block.device,
+                    #             dtype=torch.float32,
+                    #         ) * float(self.mask_task_latent_noise_std)
+                    #         latent_block[:, 1:1 + mask_steps, :] = noise.to(dtype=latent_block.dtype)
+                    #     elif self.mask_task_latent_implementation == 'zero':
+                    #         latent_block[:, 1:1 + mask_steps, :] = torch.zeros_like(latent_block[:, 1:1 + mask_steps, :])
+                    #     elif self.mask_task_latent_implementation == 'mask':
+                    #         # print(base_prefix.size(1))
+                    #         latent_mask_starts.append(base_prefix.size(1) + 1)
+                    #         latent_mask_ends.append(base_prefix.size(1) + 1 + mask_steps)
+                    #     else:
+                    #         raise NotImplementedError(
+                    #             f"mask_task_latent_implementation={self.mask_task_latent_implementation} is not implemented. If you don't want to mask task latents, set `mask_task_latent_steps=0`.")
+                            
+                    if self.shuffle_task_latents and latent_block.size(1) > 2:
+                        latent_block = latent_block.clone()
+                        ids = input_ids[b].to(dtype=torch.int64)
+                        seed_val = int(((ids + 1) * 1315423911).sum().item()) & 0xFFFFFFFFFFFFFFFF
+                        gen = torch.Generator(device='cpu')
+                        gen.manual_seed(seed_val)
+                        perm = torch.randperm(latent_block.size(1) - 2, generator=gen).to(latent_block.device) + 1
+                        latent_block[:, 1:-1, :] = latent_block[:, perm, :]
+                        # print("shuffled")
+                    
+                    if corrupt_flags[b] and latent_block.size(1) > 2:
+                        latent_block = latent_block.clone()
+                        if float(corrupt_task_latent_noise_std) > 0.0:
                             ids = input_ids[b].to(dtype=torch.int64)
                             seed_val = int(((ids + 1) * 1315423911).sum().item()) & 0xFFFFFFFFFFFFFFFF
-                            gen = torch.Generator(device=latent_state.device)
+                            gen = torch.Generator(device=latent_block.device)
                             gen.manual_seed(seed_val)
                             noise = torch.randn(
-                                latent_state.shape,
+                                latent_block[:, 1:-1, :].shape,
                                 generator=gen,
                                 device=latent_block.device,
                                 dtype=torch.float32,
-                            ) * float(self.mask_task_latent_noise_std)
-                            latent_state = noise.to(dtype=latent_state.dtype)
-                        elif self.mask_task_latent_implementation == 'zero':
-                            latent_state = torch.zeros_like(latent_state)
+                            ) * float(corrupt_task_latent_noise_std)
+                            latent_block[:, 1:-1, :] = noise.to(dtype=latent_block.dtype)
                         else:
-                            raise NotImplementedError(
-                                f"mask_task_latent_implementation={self.mask_task_latent_implementation} is not implemented. If you don't want to mask task latents, set `mask_task_latent_steps=0`.")
-                    latent_state_hist.append(latent_state)
-                    if refine_bio_tokens and bio_positions:
-                        batched_bio = base_prefix[:, bio_positions].to(dtype=self.model.dtype)
-                        batched_lat = torch.cat(latent_state_hist, dim=1).to(dtype=self.model.dtype)
-                        if self.is_bioupdater_gating:
-                            if bioupdater_gate_cache is None:
-                                if self.bio_updater_gate is None:
-                                    raise RuntimeError(
-                                        "is_bioupdater_gating=True but `bio_updater_gate` is not initialized."
-                                    )
-                                bioupdater_gate_cache = self.bio_updater_gate(
-                                    batched_lat[:, -1, :], out_dtype=batched_bio.dtype
-                                )
-                            refined = self.bio_updater(batched_bio, batched_lat)
-                            refined = refined * bioupdater_gate_cache + batched_bio * (1.0 - bioupdater_gate_cache)
-                        else:
-                            refined = self.bio_updater(batched_bio, batched_lat)
-                        base_prefix[:, bio_positions] = refined.to(dtype=base_prefix.dtype)
+                            latent_block[:, 1:-1, :] = torch.zeros_like(latent_block[:, 1:-1, :])
 
-                    new_latent = latent_state.to(dtype=self.model.dtype)
-                    new_latent = self._taskthinker_with_gating(new_latent)
-                    latent_block = torch.cat([latent_block, new_latent], dim=1)
+                    new_samples.append(torch.cat([base_prefix, latent_block], dim=1).squeeze(0))
 
-                if not ended:
-                    latent_block = torch.cat([latent_block, end_latent_emb], dim=1)
+                max_L = max(s.size(0) for s in new_samples) if new_samples else 0
+                new_prompt_embeds = torch.zeros(B, max_L, self.d_llm, device=device, dtype=self.model.dtype)
+                new_prompt_attn_mask = torch.zeros(B, max_L, device=device, dtype=torch.long)
+                for b in range(B):
+                    curr_L = new_samples[b].size(0)
+                    diff = max_L - curr_L
+                    new_prompt_embeds[b, diff:] = new_samples[b]
+                    new_prompt_attn_mask[b, diff:] = 1
+                    # print(curr_L)
+                    # if latent_mask_starts and latent_mask_ends:
+                    #     mask_start = latent_mask_starts[b] + diff
+                    #     mask_end = latent_mask_ends[b] + diff
+                    #     new_prompt_attn_mask[b, mask_start:mask_end] = 0
+                    #     # print(mask_start, mask_end)
 
-                n_task_latents = max(int(latent_block.size(1)) - 2, 0)
-                task_latent_counts.append(n_task_latents)
+                prompt_embeds, prompt_attn_mask = new_prompt_embeds, new_prompt_attn_mask
+                self._last_task_latent_counts = task_latent_counts
+            elif refine_bio_tokens and (not (use_coconut and has_latent and attention_mask is not None)):
+                # Special case: BioUpdater enabled but TaskThinker disabled -> do a single memory update once using the
+                # last prompt-side token, without generating task-latents.
+                active_indices = [b for b in range(B) if bio_positions_list[b] and fused_samples_list[b].size(1) > 0]
+                if active_indices:
+                    llm = self._get_actual_llm()
+                    backbone = llm.model
 
-                # if self.mask_task_latent_steps > 0 and latent_block.size(1) > 2:
-                #     mask_steps = min(self.mask_task_latent_steps, latent_block.size(1) - 2)
-                #     # print(mask_steps, self.mask_task_latent_steps, latent_block.size(1) - 2)
-                #     latent_block = latent_block.clone()
-                #     if self.mask_task_latent_implementation == 'noise':
-                #         ids = input_ids[b].to(dtype=torch.int64)
-                #         seed_val = int(((ids + 1) * 1315423911).sum().item()) & 0xFFFFFFFFFFFFFFFF
-                #         gen = torch.Generator(device=latent_block.device)
-                #         gen.manual_seed(seed_val)
-                #         noise = torch.randn(
-                #             latent_block[:, 1:1 + mask_steps, :].shape,
-                #             generator=gen,
-                #             device=latent_block.device,
-                #             dtype=torch.float32,
-                #         ) * float(self.mask_task_latent_noise_std)
-                #         latent_block[:, 1:1 + mask_steps, :] = noise.to(dtype=latent_block.dtype)
-                #     elif self.mask_task_latent_implementation == 'zero':
-                #         latent_block[:, 1:1 + mask_steps, :] = torch.zeros_like(latent_block[:, 1:1 + mask_steps, :])
-                #     elif self.mask_task_latent_implementation == 'mask':
-                #         # print(base_prefix.size(1))
-                #         latent_mask_starts.append(base_prefix.size(1) + 1)
-                #         latent_mask_ends.append(base_prefix.size(1) + 1 + mask_steps)
-                #     else:
-                #         raise NotImplementedError(
-                #             f"mask_task_latent_implementation={self.mask_task_latent_implementation} is not implemented. If you don't want to mask task latents, set `mask_task_latent_steps=0`.")
-                        
-                if self.shuffle_task_latents and latent_block.size(1) > 2:
-                    latent_block = latent_block.clone()
-                    ids = input_ids[b].to(dtype=torch.int64)
-                    seed_val = int(((ids + 1) * 1315423911).sum().item()) & 0xFFFFFFFFFFFFFFFF
-                    gen = torch.Generator(device='cpu')
-                    gen.manual_seed(seed_val)
-                    perm = torch.randperm(latent_block.size(1) - 2, generator=gen).to(latent_block.device) + 1
-                    latent_block[:, 1:-1, :] = latent_block[:, perm, :]
-                    # print("shuffled")
-                
-                if corrupt_flags[b] and latent_block.size(1) > 2:
-                    latent_block = latent_block.clone()
-                    if float(corrupt_task_latent_noise_std) > 0.0:
-                        ids = input_ids[b].to(dtype=torch.int64)
-                        seed_val = int(((ids + 1) * 1315423911).sum().item()) & 0xFFFFFFFFFFFFFFFF
-                        gen = torch.Generator(device=latent_block.device)
-                        gen.manual_seed(seed_val)
-                        noise = torch.randn(
-                            latent_block[:, 1:-1, :].shape,
-                            generator=gen,
-                            device=latent_block.device,
-                            dtype=torch.float32,
-                        ) * float(corrupt_task_latent_noise_std)
-                        latent_block[:, 1:-1, :] = noise.to(dtype=latent_block.dtype)
-                    else:
-                        latent_block[:, 1:-1, :] = torch.zeros_like(latent_block[:, 1:-1, :])
+                    embeds_in = prompt_embeds
+                    out = backbone(
+                        inputs_embeds=embeds_in,
+                        attention_mask=prompt_attn_mask,
+                        return_dict=True,
+                        use_cache=False,
+                    )
+                    hidden_states = out.last_hidden_state  # (B, L, d)
 
-                new_samples.append(torch.cat([base_prefix, latent_block], dim=1).squeeze(0))
+                    bios = []
+                    lats = []
+                    for b in active_indices:
+                        diff = int(diffs[b])
+                        curr_L = int(fused_samples_list[b].size(1))
+                        anchor_pos = diff + curr_L - 1
+                        bios.append(embeds_in[b, [idx + diff for idx in bio_positions_list[b]]])
+                        lats.append(hidden_states[b, anchor_pos].unsqueeze(0))
 
-            max_L = max(s.size(0) for s in new_samples) if new_samples else 0
-            new_prompt_embeds = torch.zeros(B, max_L, self.d_llm, device=device, dtype=self.model.dtype)
-            new_prompt_attn_mask = torch.zeros(B, max_L, device=device, dtype=torch.long)
-            for b in range(B):
-                curr_L = new_samples[b].size(0)
-                diff = max_L - curr_L
-                new_prompt_embeds[b, diff:] = new_samples[b]
-                new_prompt_attn_mask[b, diff:] = 1
-                # print(curr_L)
-                # if latent_mask_starts and latent_mask_ends:
-                #     mask_start = latent_mask_starts[b] + diff
-                #     mask_end = latent_mask_ends[b] + diff
-                #     new_prompt_attn_mask[b, mask_start:mask_end] = 0
-                #     # print(mask_start, mask_end)
+                    batched_bio = torch.nn.utils.rnn.pad_sequence(bios, batch_first=True)
+                    batched_lat = torch.stack(lats, dim=0).to(dtype=self.model.dtype)
+                    refined = self._bioupdater_with_gating(batched_bio.to(self.model.dtype), batched_lat)
 
-            prompt_embeds, prompt_attn_mask = new_prompt_embeds, new_prompt_attn_mask
-            self._last_task_latent_counts = task_latent_counts
-        elif refine_bio_tokens and (not (use_coconut and has_latent and attention_mask is not None)):
-            # Special case: BioUpdater enabled but TaskThinker disabled -> do a single memory update once using the
-            # last prompt-side token, without generating task-latents.
-            active_indices = [b for b in range(B) if bio_positions_list[b] and fused_samples_list[b].size(1) > 0]
-            if active_indices:
-                llm = self._get_actual_llm()
-                backbone = llm.model
-
-                embeds_in = prompt_embeds
-                out = backbone(
-                    inputs_embeds=embeds_in,
-                    attention_mask=prompt_attn_mask,
-                    return_dict=True,
-                    use_cache=False,
-                )
-                hidden_states = out.last_hidden_state  # (B, L, d)
-
-                bios = []
-                lats = []
-                for b in active_indices:
-                    diff = int(diffs[b])
-                    curr_L = int(fused_samples_list[b].size(1))
-                    anchor_pos = diff + curr_L - 1
-                    bios.append(embeds_in[b, [idx + diff for idx in bio_positions_list[b]]])
-                    lats.append(hidden_states[b, anchor_pos].unsqueeze(0))
-
-                batched_bio = torch.nn.utils.rnn.pad_sequence(bios, batch_first=True)
-                batched_lat = torch.stack(lats, dim=0).to(dtype=self.model.dtype)
-                refined = self._bioupdater_with_gating(batched_bio.to(self.model.dtype), batched_lat)
-
-                embeds_out = embeds_in.clone()
-                for i, b in enumerate(active_indices):
-                    diff = int(diffs[b])
-                    positions = [idx + diff for idx in bio_positions_list[b]]
-                    embeds_out[b, positions] = refined[i, : len(positions)].to(dtype=embeds_out.dtype)
-                prompt_embeds = embeds_out
-
+                    embeds_out = embeds_in.clone()
+                    for i, b in enumerate(active_indices):
+                        diff = int(diffs[b])
+                        positions = [idx + diff for idx in bio_positions_list[b]]
+                        embeds_out[b, positions] = refined[i, : len(positions)].to(dtype=embeds_out.dtype)
+                    prompt_embeds = embeds_out
+            self.total_inference_flops = flop_counter.get_total_flops()
         return prompt_embeds, prompt_attn_mask
 
     @torch.no_grad()
@@ -1785,6 +1799,7 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         temperature: float = 0.7,
         top_p: float = 0.9,
         do_sample: bool = True,
+        use_cache: bool = True,
         **kwargs,
     ):
         """
@@ -1795,6 +1810,13 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         # Backward compatible: allow passing List[str] (one SMILES per sample)
         if smiles_list and isinstance(smiles_list[0], str):
             smiles_list = [[s] for s in smiles_list]  # type: ignore[list-item]
+        
+        start_event = torch.cuda.Event(enable_timing=True)
+        mid_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+
+        torch.cuda.synchronize()
+        start_event.record()
 
         # Reuse the shared embedding builder (and latent feedback) so vLLM can share the same code path.
         prompt_embeds, prompt_attn_mask = self.get_prompt_embeddings(
@@ -1803,19 +1825,44 @@ class Qwen3MoleculeLLM(PreTrainedModel):
             attention_mask=attention_mask,
             refine_bio_tokens=kwargs.get("refine_bio_tokens", True),
         )
-        # 5. 调用生成
-        outputs = self.model.generate(
-            inputs_embeds=prompt_embeds,
-            attention_mask=prompt_attn_mask,
-            max_new_tokens=max_new_tokens,
-            do_sample=do_sample,
-            temperature=temperature if do_sample else None,
-            top_p=top_p if do_sample else None,
-            eos_token_id=self.tokenizer.eos_token_id,
-            pad_token_id=self.tokenizer.pad_token_id,
-            use_cache=True,
-            **kwargs
-        )
+
+        mid_event.record()
+
+        # prefill_inputs = {"inputs_embeds": prompt_embeds, "attention_mask": prompt_attn_mask, "use_cache": True}
+        # prefill_flops = FlopCountAnalysis(self.model, (), prefill_inputs).total()
+
+        with FlopCounterMode(display=False) as gen_counter:
+                outputs = self.model.generate(
+                    inputs_embeds=prompt_embeds,
+                    attention_mask=prompt_attn_mask,
+                    max_new_tokens=max_new_tokens,
+                    do_sample=do_sample,
+                    temperature=temperature if do_sample else None,
+                    top_p=top_p if do_sample else None,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    use_cache=use_cache,
+                    **kwargs
+                )
+                self.total_inference_flops += gen_counter.get_total_flops()
+
+        end_event.record()
+        # 必须同步，否则 CPU 拿不到准确的时间戳
+        torch.cuda.synchronize()
+
+        total_latency = start_event.elapsed_time(end_event)
+        thinking_latency = start_event.elapsed_time(mid_event)
+        generation_latency = mid_event.elapsed_time(end_event)
+
+        self.total_time.append(total_latency)
+        self.latent_time.append(thinking_latency)
+        self.text_time.append(generation_latency)
+
+        gen_len = outputs.shape[1]
+        # self.total_inference_flops += prefill_step_flops + (gen_len * decode_single_step_flops)
+        self.sample_step_latent_flops.append(gen_len)
+
+        self.sample_latent_flops.append(self.total_inference_flops)
 
         return outputs
 
