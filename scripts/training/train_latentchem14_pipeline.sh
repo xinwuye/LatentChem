@@ -8,11 +8,13 @@ cd "${repo_root}/code_train_sft"
 
 stage1_output="./outputs/latentchem14-stage1"
 stage4_output="./outputs/latentchem14-stage4"
+data_path="/public/home/xinwuye/Bio-LatentCOT/ChemCotDataset/chemcotbench-cot"
 
 echo "Starting latentchem14 ablation pipeline..."
 
 accelerate launch --multi_gpu --num_processes 8 train_stage3.py \
   --training_stage 1 \
+  --data_path "${data_path}" \
   --epochs_per_stage 3 \
   --output_dir "${stage1_output}" \
   --batch_size 4 \
@@ -23,6 +25,7 @@ accelerate launch --multi_gpu --num_processes 8 train_stage3.py \
 
 accelerate launch --multi_gpu --num_processes 8 train_grpo_try2.py \
   --run_name stage4 \
+  --data_path "${data_path}" \
   --lora_path "${stage1_output}/stage1/lora_weights" \
   --projector_path "${stage1_output}/stage1/mm_projector.pt" \
   --output_dir "${stage4_output}" \
