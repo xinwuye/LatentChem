@@ -1,11 +1,12 @@
 import os
 import argparse
 import logging
+import sys
 from datetime import datetime
 
 import torch
 from peft import LoraConfig, TaskType, get_peft_model, PeftModel
-from transformers import TrainerCallback
+from transformers import TrainerCallback, set_seed as hf_set_seed
 
 try:
     import wandb  # type: ignore
@@ -42,6 +43,12 @@ logger = logging.getLogger(__name__)
 
 def _resolve_qwen_model_path(qwen_size: str) -> str:
     return ModelConfig.require_qwen_path(qwen_size)
+
+
+def _arg_was_explicitly_provided(argv: list[str], flag: str) -> bool:
+    if not flag.startswith("--"):
+        raise ValueError(f"Expected a long CLI flag like '--seed', got: {flag}")
+    return any(arg == flag or arg.startswith(flag + "=") for arg in argv)
 
 def _find_latest_checkpoint(run_dir: str) -> str | None:
     if not run_dir or (not os.path.isdir(run_dir)):
@@ -404,7 +411,15 @@ def main():
         default=None,
         help="Resume from a checkpoint dir, or set to 'latest' to auto-pick the newest checkpoint under output_dir/run_name.",
     )
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help=(
+            "Training seed. Trainer-side seed behavior matches the previous default. "
+            "When explicitly provided, the same seed is also propagated to vLLM generation."
+        ),
+    )
     parser.add_argument("--max_prompt_length", type=int, default=2048)
     parser.add_argument("--max_completion_length", type=int, default=256)
 
@@ -534,11 +549,16 @@ def main():
     )
     parser.add_argument("--vllm_max_model_len", type=int, default=4096, help="Maximum model length for vLLM engine.")
 
+    raw_argv = sys.argv[1:]
     args = parser.parse_args()
+    seed_was_explicitly_provided = _arg_was_explicitly_provided(raw_argv, "--seed")
     qwen_model_path = _resolve_qwen_model_path(args.qwen_size)
     set_tokenizer_model_path(qwen_model_path)
     if args.vllm_ckpt is None:
         args.vllm_ckpt = qwen_model_path
+
+    if seed_was_explicitly_provided:
+        hf_set_seed(args.seed)
 
     run_name = args.run_name or f"grpo_try1-{datetime.now().strftime('%m%d-%H%M')}"
     os.makedirs(args.output_dir, exist_ok=True)
@@ -695,6 +715,7 @@ def main():
         corrupt_latent_noise_std=corrupt_latent_noise_std,
         log_reward_trace=bool(args.log_reward_trace),
         reward_trace_dir=args.reward_trace_dir,
+        vllm_seed=(int(args.seed) if seed_was_explicitly_provided else None),
     )
 
     resume = args.resume_from_checkpoint

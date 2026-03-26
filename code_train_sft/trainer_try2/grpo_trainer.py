@@ -86,6 +86,7 @@ class QwenMoleculeGRPOTrainer(_TRL_GRPOTrainer):
         corrupt_latent_noise_std: float = 0.0,
         log_reward_trace: bool = False,
         reward_trace_dir: str | None = None,
+        vllm_seed: int | None = None,
     ):
         # We implement our own vLLM prompt_embeds path for this multimodal model.
         # TRL's stock vLLM integration generates from token ids and cannot consume `prompt_embeds` built from SMILES.
@@ -151,6 +152,7 @@ class QwenMoleculeGRPOTrainer(_TRL_GRPOTrainer):
         self.training_stage = int(training_stage)
         self.corrupt_prob = float(corrupt_prob)
         self.corrupt_latent_noise_std = float(corrupt_latent_noise_std)
+        self.vllm_seed = None if vllm_seed is None else int(vllm_seed)
         self.log_reward_trace = bool(log_reward_trace)
         self.reward_trace_dir: str | None = None
         self._reward_trace_path: str | None = None
@@ -248,7 +250,11 @@ class QwenMoleculeGRPOTrainer(_TRL_GRPOTrainer):
             max_num_seqs=vllm_max_num_seqs,
             max_model_len=self.vllm_max_model_length,
             distributed_executor_backend="external_launcher",
-            seed=self.accelerator.process_index // self.vllm_tensor_parallel_size,
+            seed=(
+                self.vllm_seed
+                if self.vllm_seed is not None
+                else self.accelerator.process_index // self.vllm_tensor_parallel_size
+            ),
             enable_prompt_embeds=True,
         )
         if self.vllm_enable_sleep_mode:

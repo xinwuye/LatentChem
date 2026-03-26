@@ -13,6 +13,7 @@ import logging
 from datetime import datetime
 import argparse
 import inspect
+import sys
 import wandb
 import plotext as plt
 
@@ -23,6 +24,7 @@ from config import ModelConfig
 # from train_sft_stage2 import MultiModalDataCollator, MultiModalSFTTrainer, LoraTrainingMonitorCallback, TerminalPlotCallback
 import torch.nn.functional as F
 import random
+from transformers import set_seed as hf_set_seed
 
 # 设置日志
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 def _resolve_qwen_model_path(qwen_size: str) -> str:
     return ModelConfig.require_qwen_path(qwen_size)
+
+
+def _arg_was_explicitly_provided(argv: list[str], flag: str) -> bool:
+    if not flag.startswith("--"):
+        raise ValueError(f"Expected a long CLI flag like '--seed', got: {flag}")
+    return any(arg == flag or arg.startswith(flag + "=") for arg in argv)
 
 # 自定义回调函数，用于监控训练过程
 class LoraTrainingMonitorCallback(TrainerCallback):
@@ -403,6 +411,15 @@ def train_stage3():
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--grad_accum", type=int, default=1)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help=(
+            "Optional training seed. This only changes stage1-3 behavior when explicitly provided. "
+            "If omitted, the current default behavior is preserved."
+        ),
+    )
     parser.add_argument("--max_seq_length", type=int, default=8192)
     parser.add_argument("--save_full_model", type=lambda x: (str(x).lower() == 'true'), default=False, help="Whether to save full model weights (default False to save space)")
     parser.add_argument("--training_stage", type=int, default=3, choices=[1, 2, 3], help="Which stage to train: 1 (No COT), 2 (With COT), 3 (Latent/Coconut)")
@@ -581,9 +598,14 @@ def train_stage3():
     parser.add_argument("--cf_margin", type=float, default=0.5, help="Margin for hinge on (L_cf - L_pos).")
     parser.add_argument("--cf_prob", type=float, default=1.0, help="Probability of triggering a counterfactual paired-loss pass for a batch.")
     
+    raw_argv = sys.argv[1:]
     args = parser.parse_args()
+    seed_was_explicitly_provided = _arg_was_explicitly_provided(raw_argv, "--seed")
     qwen_model_path = _resolve_qwen_model_path(args.qwen_size)
     set_tokenizer_model_path(qwen_model_path)
+
+    if seed_was_explicitly_provided:
+        hf_set_seed(args.seed)
 
     # 1. 基础配置
     mol_config = {
@@ -806,6 +828,8 @@ def train_stage3():
             "lr_scheduler_type": "cosine",
             "weight_decay": 0.01,
         }
+        if seed_was_explicitly_provided:
+            sft_config_kwargs["seed"] = args.seed
         
         # 检查 SFTConfig 支持哪个参数名 (max_seq_length 还是 max_length)
         if "max_seq_length" in inspect.signature(SFTConfig.__init__).parameters:
