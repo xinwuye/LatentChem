@@ -350,6 +350,24 @@ def main():
     # Output
     parser.add_argument("--output_dir", type=str, default="./outputs/grpo_try1")
     parser.add_argument("--run_name", type=str, default=None)
+    parser.add_argument(
+        "--log_reward_trace",
+        type=lambda x: (str(x).lower() == "true"),
+        default=False,
+        help=(
+            "If true, write per-rollout reward traces as rank-sharded JSONL files. "
+            "Default: false."
+        ),
+    )
+    parser.add_argument(
+        "--reward_trace_dir",
+        type=str,
+        default=None,
+        help=(
+            "Optional directory for per-rank reward trace JSONL files. "
+            "Defaults to <output_dir>/<run_name>/reward_trace when --log_reward_trace true."
+        ),
+    )
 
     # Logging / Weights & Biases
     parser.add_argument(
@@ -675,6 +693,8 @@ def main():
         training_stage=int(training_stage),
         corrupt_prob=corrupt_prob,
         corrupt_latent_noise_std=corrupt_latent_noise_std,
+        log_reward_trace=bool(args.log_reward_trace),
+        reward_trace_dir=args.reward_trace_dir,
     )
 
     resume = args.resume_from_checkpoint
