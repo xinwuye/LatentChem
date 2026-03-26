@@ -38,12 +38,18 @@ Thumbs.db
 
 # 其他临时文件
 *.log
+slurm_logs/*
+!slurm_logs/.gitkeep
 
 # 忽略任何目录下以 output 开头的文件夹
 **/output*/
 
 # 忽略任何目录下以 debug 开头的文件夹
 **/debug*/
+code_train_sft/outputs/debug-stage1/
+code_train_sft/outputs/debug-stage2/
+code_train_sft/outputs/debug-stage3/
+code_train_sft/outputs/debug-stage4/
 
 # SMI-TED model file
 materials/
