@@ -31,7 +31,7 @@ accelerate launch --multi_gpu --num_processes 8 train_grpo_text.py \
   --lr 1e-5 \
   --epochs 1 \
   --max_prompt_length 2048 \
-  --max_completion_length 4096 \
+  --max_completion_length 2048 \
   --num_generations 8 \
   --num_iterations 1 \
   --beta 0.0 \
@@ -39,7 +39,7 @@ accelerate launch --multi_gpu --num_processes 8 train_grpo_text.py \
   --use_vllm \
   --vllm_mode colocate \
   --vllm_gpu_memory_utilization 0.3 \
-  --vllm_max_model_len 6144 \
+  --vllm_max_model_len 4096 \
   --temperature 1.5 \
   --gradient_checkpointing \
   "$@"
