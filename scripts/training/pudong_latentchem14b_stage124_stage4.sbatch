@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J latentchem14b_stage124
 #SBATCH --partition=gpu
-#SBATCH --exclude=server13
+#SBATCH --exclude=server13,server16
 #SBATCH -N 1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:8
