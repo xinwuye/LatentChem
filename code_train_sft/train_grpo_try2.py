@@ -533,6 +533,15 @@ def main():
     parser.add_argument("--vllm_tensor_parallel_size", type=int, default=1)
     parser.add_argument("--vllm_gpu_memory_utilization", type=float, default=0.9)
     parser.add_argument(
+        "--vllm_seed",
+        type=int,
+        default=None,
+        help=(
+            "Optional explicit seed for vLLM generation. "
+            "If omitted, keep the default per-rank vLLM seeding behavior."
+        ),
+    )
+    parser.add_argument(
         "--vllm_ckpt",
         type=str,
         default=None,
@@ -701,6 +710,7 @@ def main():
         corrupt_latent_noise_std=corrupt_latent_noise_std,
         log_reward_trace=bool(args.log_reward_trace),
         reward_trace_dir=args.reward_trace_dir,
+        vllm_seed=args.vllm_seed,
     )
 
     resume = args.resume_from_checkpoint
