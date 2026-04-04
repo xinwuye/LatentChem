@@ -24,6 +24,7 @@ from config import ModelConfig
 # from train_sft_stage2 import MultiModalDataCollator, MultiModalSFTTrainer, LoraTrainingMonitorCallback, TerminalPlotCallback
 import torch.nn.functional as F
 import random
+import pandas as pd
 
 from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm

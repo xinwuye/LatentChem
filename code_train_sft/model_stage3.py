@@ -465,6 +465,13 @@ class Qwen3MoleculeLLM(PreTrainedModel):
         self.task_thinker_dropout = float(task_thinker_dropout)
         self.max_cot_string_len = int(max_cot_string_len)
         self.task_latent_max_steps = int(task_latent_max_steps)
+        self.sample_latent_flops = []
+        self.sample_inner_flops = []
+        self.sample_step_latent_flops = []
+        self.total_inference_flops = 0
+        self.total_time = []
+        self.latent_time = []
+        self.text_time = []
 
         # ---- 1. 加载预训练的Qwen LLM ----
         self.tokenizer = AutoTokenizer.from_pretrained(qwen_model_name)

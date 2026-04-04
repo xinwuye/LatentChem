@@ -11,6 +11,7 @@ import glob
 from datasets import load_dataset
 from transformers import AutoTokenizer
 from config import ModelConfig
+import ast
 
 # --------------------------------
 # Load tokenizer (Qwen decoder-only LM)
@@ -53,6 +54,8 @@ def extract_fields(example, is_eval: bool = False):
     # meta 字段是一个 JSON 字符串，需要先解析
     if isinstance(example["meta"], str):
         meta_dict = json.loads(example["meta"])
+    else:
+        meta_dict = example["meta"]
     task = example['subtask']
 
     # 2. 解析 struct_cot
@@ -117,9 +120,13 @@ def extract_fields(example, is_eval: bool = False):
     candidate_rank = meta_dict.get("candidate_rank")
     if candidate_rank:
         if isinstance(candidate_rank, str):
-            candidate_rank = json.loads(candidate_rank)
-        
-        print(candidate_rank)
+            try:
+                candidate_rank = json.loads(candidate_rank)
+            except json.JSONDecodeError:
+                try: 
+                    candidate_rank = ast.literal_eval(candidate_rank)
+                except:
+                    print(f"Error in candidate_rank: {candidate_rank}")
         raw_val.extend(candidate_rank)
 
     if isinstance(raw_val, str):
@@ -414,6 +421,8 @@ def load_data(
     data_files = [f for f in all_json_files if filter_data(f)]
 
     ds = load_dataset("json", data_files=data_files)["train"]
+
+    ds = ds.shuffle(seed=42).select(range(int(0.1 * len(ds))))
 
     bad_ids = [
         "f7e567a6-47de-4c77-8c1f-9049689322e8",
