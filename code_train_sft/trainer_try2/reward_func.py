@@ -100,6 +100,31 @@ def _infer_expected_answer_type(prompt: str) -> str:
     return "unknown"
 
 
+def _normalize_task_name(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    return str(value).strip().lower()
+
+
+def _infer_expected_answer_type_for_sample(
+    prompt: str,
+    *,
+    task: Optional[str] = None,
+    subtask: Optional[str] = None,
+) -> str:
+    """
+    Prefer benchmark routing fields when they define the answer type.
+
+    Prompt text remains the fallback for generic tasks whose answer type is encoded only in
+    the formatting instruction inserted by `extract_fields()`.
+    """
+    del subtask
+    task_name = _normalize_task_name(task)
+    if task_name in {"mol_edit", "mol_opt"}:
+        return "smiles"
+    return _infer_expected_answer_type(prompt)
+
+
 def _extract_answer_text(completion: str) -> Optional[str]:
     m = _ANSWER_RE.search(completion or "")
     if not m:
@@ -139,6 +164,8 @@ def reward_answer_type_validity(
     completions: List[str],
     completion_ids=None,
     corrupt_task_latents: Optional[List[bool]] = None,
+    task: Optional[List[str]] = None,
+    subtask: Optional[List[str]] = None,
     **kwargs,
 ):
     """
@@ -160,7 +187,9 @@ def reward_answer_type_validity(
         if corrupt_flags is not None and i < len(corrupt_flags) and corrupt_flags[i]:
             rewards.append(0.0)
             continue
-        expected = _infer_expected_answer_type(p)
+        t = task[i] if task is not None and i < len(task) else None
+        st = subtask[i] if subtask is not None and i < len(subtask) else None
+        expected = _infer_expected_answer_type_for_sample(p, task=t, subtask=st)
         answer = _extract_answer_text(c or "")
         if not answer:
             rewards.append(0.0)
@@ -330,87 +359,93 @@ def is_correct_answer_bench(
 
     This is used by the GRPO trainer to build stage4/5 corruption loss masks.
     """
-    expected = _infer_expected_answer_type(prompt or "")
     pred = _extract_answer_text(completion or "")
     if pred is None:
         return False
 
-    if expected == "smiles":
+    task_name = _normalize_task_name(task)
+    subtask_name = _normalize_task_name(subtask)
+
+    # mol_edit: functional-group constraints (no fixed target SMILES).
+    if task_name == "mol_edit":
         pred_clean = _extract_smiles_candidate(pred)
-
-        # mol_edit: functional-group constraints (no fixed target SMILES).
-        if task == "mol_edit":
-            meta_dict = _parse_meta(meta)
-            src = meta_dict.get("molecule")
-            if not (isinstance(src, str) and src.strip()):
-                return False
-
-            _ensure_bench_reward_utils_importable()
-            from ChemCoTBench.eval_moledit import (  # type: ignore
-                check_edit_add_valid,
-                check_edit_del_valid,
-                check_edit_sub_valid,
-            )
-
-            if subtask == "add":
-                group = _clean_group_name(meta_dict.get("added_group"))
-                if not group:
-                    return False
-                return bool(check_edit_add_valid(src=src, tgt=pred_clean, group=group))
-            if subtask == "delete":
-                group = _clean_group_name(meta_dict.get("removed_group"))
-                if not group:
-                    return False
-                return bool(check_edit_del_valid(src=src, tgt=pred_clean, group=group))
-            if subtask == "sub":
-                add_group = _clean_group_name(meta_dict.get("added_group"))
-                remove_group = _clean_group_name(meta_dict.get("removed_group"))
-                if not add_group or not remove_group:
-                    return False
-                return bool(
-                    check_edit_sub_valid(src=src, tgt=pred_clean, remove_group=remove_group, add_group=add_group)
-                )
+        meta_dict = _parse_meta(meta)
+        src = meta_dict.get("molecule")
+        if not (isinstance(src, str) and src.strip()):
             return False
 
-        # mol_opt: property improvement (oracle-based).
-        if task == "mol_opt":
-            meta_dict = _parse_meta(meta)
-            src = meta_dict.get("molecule")
-            prop_dict = {
-                "logp": "logp",
-                "solubility": "solubility",
-                "qed": "qed",
-                "drd": "drd2",
-                "jnk": "jnk3",
-                "gsk": "gsk3b",
-            }
-            prop = prop_dict.get(str(subtask or "").strip().lower())
-            if not isinstance(src, str) or not src.strip():
-                raise ValueError(f"mol_opt meta missing valid `molecule`: {src!r}")
-            if not prop:
-                raise ValueError(f"Unknown mol_opt subtask: {subtask!r}")
+        _ensure_bench_reward_utils_importable()
+        from ChemCoTBench.eval_moledit import (  # type: ignore
+            check_edit_add_valid,
+            check_edit_del_valid,
+            check_edit_sub_valid,
+        )
 
-            _ensure_bench_reward_utils_importable()
-            from ChemCoTBench.core.eval_metric import mol_opt_evaluater  # type: ignore
-
-            evaluater = _MOLOPT_EVALUATER_CACHE.get(prop)
-            if evaluater is None:
-                evaluater = mol_opt_evaluater(prop=prop)
-                _MOLOPT_EVALUATER_CACHE[prop] = evaluater
-
-            oracle = getattr(evaluater, "property_oracle", None)
-            if oracle is None:
-                raise AttributeError(f"mol_opt_evaluater(prop={prop!r}) missing `property_oracle`.")
-
-            # Treat invalid predicted SMILES as incorrect (no reward), but do not silently swallow other errors.
-            if _canon_smiles(src) is None or _canon_smiles(pred_clean) is None:
+        if subtask_name == "add":
+            group = _clean_group_name(meta_dict.get("added_group"))
+            if not group:
                 return False
-
-            src_score = oracle(src)
-            tgt_score = oracle(pred_clean)
-            if src_score is None or tgt_score is None:
+            return bool(check_edit_add_valid(src=src, tgt=pred_clean, group=group))
+        if subtask_name == "delete":
+            group = _clean_group_name(meta_dict.get("removed_group"))
+            if not group:
                 return False
-            return bool((tgt_score - src_score) > 0)
+            return bool(check_edit_del_valid(src=src, tgt=pred_clean, group=group))
+        if subtask_name == "sub":
+            add_group = _clean_group_name(meta_dict.get("added_group"))
+            remove_group = _clean_group_name(meta_dict.get("removed_group"))
+            if not add_group or not remove_group:
+                return False
+            return bool(
+                check_edit_sub_valid(src=src, tgt=pred_clean, remove_group=remove_group, add_group=add_group)
+            )
+        return False
+
+    # mol_opt: property improvement (oracle-based).
+    if task_name == "mol_opt":
+        pred_clean = _extract_smiles_candidate(pred)
+        meta_dict = _parse_meta(meta)
+        src = meta_dict.get("molecule")
+        prop_dict = {
+            "logp": "logp",
+            "solubility": "solubility",
+            "qed": "qed",
+            "drd": "drd2",
+            "jnk": "jnk3",
+            "gsk": "gsk3b",
+        }
+        prop = prop_dict.get(str(subtask_name or "").strip().lower())
+        if not isinstance(src, str) or not src.strip():
+            raise ValueError(f"mol_opt meta missing valid `molecule`: {src!r}")
+        if not prop:
+            raise ValueError(f"Unknown mol_opt subtask: {subtask!r}")
+
+        _ensure_bench_reward_utils_importable()
+        from ChemCoTBench.core.eval_metric import mol_opt_evaluater  # type: ignore
+
+        evaluater = _MOLOPT_EVALUATER_CACHE.get(prop)
+        if evaluater is None:
+            evaluater = mol_opt_evaluater(prop=prop)
+            _MOLOPT_EVALUATER_CACHE[prop] = evaluater
+
+        oracle = getattr(evaluater, "property_oracle", None)
+        if oracle is None:
+            raise AttributeError(f"mol_opt_evaluater(prop={prop!r}) missing `property_oracle`.")
+
+        # Treat invalid predicted SMILES as incorrect (no reward), but do not silently swallow other errors.
+        if _canon_smiles(src) is None or _canon_smiles(pred_clean) is None:
+            return False
+
+        src_score = oracle(src)
+        tgt_score = oracle(pred_clean)
+        if src_score is None or tgt_score is None:
+            return False
+        return bool((tgt_score - src_score) > 0)
+
+    expected = _infer_expected_answer_type(prompt or "")
+
+    if expected == "smiles":
+        pred_clean = _extract_smiles_candidate(pred)
 
         # Default SMILES: exact match (canonicalized).
         gold = _extract_answer_text(label or "") or (label or "").strip()

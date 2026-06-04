@@ -53,7 +53,12 @@ def extract_fields(example, is_eval: bool = False):
     # meta 字段是一个 JSON 字符串，需要先解析
     if isinstance(example["meta"], str):
         meta_dict = json.loads(example["meta"])
-    task = example['subtask']
+    elif isinstance(example["meta"], dict):
+        meta_dict = example["meta"]
+    else:
+        raise TypeError(f"Unsupported meta type: {type(example['meta'])}")
+    benchmark_task = example["task"]
+    subtask = example["subtask"]
 
     # 2. 解析 struct_cot
     # 如果 struct_cot 是不可解析的 JSON 会抛出错误并让上层决定
@@ -187,7 +192,8 @@ def extract_fields(example, is_eval: bool = False):
         
         # 如果没有任何特定的 JSON 块被匹配上，追加默认格式指令
         if not matched_format:
-            query = query.rstrip() + "\nYour final answer must be formatted as <answer> Your Answer </answer>"
+            placeholder = "SMILES" if benchmark_task in {"mol_edit", "mol_opt"} else "Your Answer"
+            query = query.rstrip() + f"\nYour final answer must be formatted as <answer> {placeholder} </answer>"
         
         query = query.strip()
 
@@ -214,7 +220,7 @@ def extract_fields(example, is_eval: bool = False):
             "label": None,
             "cot": None,
             "cot_steps": None,
-            "task": task
+            "task": benchmark_task,
         }
 
     return {
@@ -225,16 +231,15 @@ def extract_fields(example, is_eval: bool = False):
         # LLM 的监督答案
         "label": f"<answer> {label_value} </answer>",
         # Benchmark routing (used by GRPO rewards)
-        "task": example.get("task"),
-        "subtask": example.get("subtask"),
-        "meta": example.get("meta"),
+        "task": benchmark_task,
+        "subtask": subtask,
+        "meta": example["meta"],
         # 结构化思维链 (CoT)
         "cot": cot_value,
         # CoT 字符长度（用于动态分配 latent 数量）
         "cot_len": len(cot_value) if cot_value is not None else 0,
         # 分步思维链 (Coconut 专用)
         "cot_steps": cot_steps,
-        "task": task
     }
 
 
